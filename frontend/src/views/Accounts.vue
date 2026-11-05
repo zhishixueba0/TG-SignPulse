@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
-import { Play, FileText, Edit2, Trash2, Plus, QrCode, Phone, Zap, MonitorSmartphone, MessageCircle, CheckCircle2, Search, RefreshCw, XCircle, X, Users } from 'lucide-vue-next'
+import { Play, FileText, Edit2, Trash2, Plus, QrCode, Phone, Zap, MonitorSmartphone, MessageCircle, CheckCircle2, Search, RefreshCw, XCircle, X, Users, FileDown, KeyRound } from 'lucide-vue-next'
 import {
   fetchAccountAvatar,
 } from '../lib/api'
@@ -58,7 +58,7 @@ const pendingReloginName = ref('')
 const showAddModal = ref(false)
 const showEditModal = ref(false)
 const showAddMenu = ref(false)
-const initialMethod = ref<'code' | 'qr'>('code')
+const initialMethod = ref<'code' | 'qr' | 'import' | 'passkey'>('code')
 const initialAccountName = ref('')
 const editingAccount = ref<AccountUiItem | null>(null)
 const showDeviceModal = ref(false)
@@ -218,7 +218,7 @@ const onEditModalClosed = () => {
   showAddModal.value = true
 }
 
-const openAddModal = (method: 'code' | 'qr') => {
+const openAddModal = (method: 'code' | 'qr' | 'import' | 'passkey') => {
   initialAccountName.value = ''
   initialMethod.value = method
   showAddMenu.value = false
@@ -513,6 +513,12 @@ const goTasks = (name: string) => {
           </button>
           <button type="button" class="ui-card ui-card-hover flex items-center gap-2.5 px-4 py-2.5 text-sm text-[var(--sp-text)] shadow-[var(--sp-shadow-md)] rounded-[var(--sp-radius)] cursor-pointer" @click="openAddModal('code')">
             <Phone class="w-4 h-4 text-[var(--sp-text-muted)]" /> {{ t('accounts.codeLogin') }}
+          </button>
+          <button type="button" class="ui-card ui-card-hover flex items-center gap-2.5 px-4 py-2.5 text-sm text-[var(--sp-text)] shadow-[var(--sp-shadow-md)] rounded-[var(--sp-radius)] cursor-pointer" @click="openAddModal('import')">
+            <FileDown class="w-4 h-4 text-[var(--sp-text-muted)]" /> {{ t('accounts.importLogin') }}
+          </button>
+          <button type="button" class="ui-card ui-card-hover flex items-center gap-2.5 px-4 py-2.5 text-sm text-[var(--sp-text)] shadow-[var(--sp-shadow-md)] rounded-[var(--sp-radius)] cursor-pointer" @click="openAddModal('passkey')">
+            <KeyRound class="w-4 h-4 text-[var(--sp-text-muted)]" /> {{ t('accounts.passkeyLogin') }}
           </button>
         </div>
       </transition>

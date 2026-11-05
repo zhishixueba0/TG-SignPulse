@@ -224,6 +224,7 @@
     "resetOtherDevicesSuccess": "已成功清退其他设备",
     "resetOtherDevicesFailed": "清退其他设备失败",
     "importSession": "导入会话",
+    "importLogin": "导入会话",
     "passkeyLogin": "通行密钥",
     "exportStandaloneSessionShort": "派生导出",
     "exportStandaloneSessionConfirmTitle": "派生独立 SessionString 导出",

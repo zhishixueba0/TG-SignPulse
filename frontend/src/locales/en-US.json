@@ -224,6 +224,7 @@
     "resetOtherDevicesSuccess": "Successfully terminated other sessions",
     "resetOtherDevicesFailed": "Failed to reset other sessions",
     "importSession": "Import Session",
+    "importLogin": "Import Session",
     "passkeyLogin": "Passkey",
     "exportStandaloneSessionShort": "Derive Session",
     "exportStandaloneSessionConfirmTitle": "Derive Independent SessionString Export",
