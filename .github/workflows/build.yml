@@ -1,0 +1,110 @@
+# TG-SignPulse fork 一键部署：推 main 即自动构建前端并把镜像推到 GHCR，
+# VPS 上只需跑 update.sh（docker compose pull && docker compose up -d）。
+#
+# 为什么不用上游 .github/workflows/docker.yml：
+# 它的 build-and-push 需要 test + frontend-test 先全过，而当前后端基线
+# 有 81 个已知失败（见 GAP-ACCOUNTS.md），镜像永远发不出来。
+# 本工作流只做构建 + 推送，不把全量测试套件当成发版门禁。
+# 前端在 Actions 上构建（node 版本跟 .nvmrc），不在 960MB 的 VPS 上构建。
+#
+# 镜像定义不重写：用仓库里的 Dockerfile.vps（与 VPS 在用的是同一份，
+# 前端用预编译的 frontend/dist，不在镜像里再跑 npm 构建）。
+# 标签：latest + sha-<短 sha>，公开仓库，VPS 匿名拉取无需鉴权。
+name: Build and push GHCR image
+
+on:
+  push:
+    branches: ["main"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: ghcr-build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Set up Node
+        uses: actions/setup-node@v5
+        with:
+          node-version-file: ".nvmrc"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Build frontend
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run build
+
+      - name: Prepare Docker build context
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Dockerfile.vps 直接 COPY 预编译的 frontend/dist；上游 .dockerignore
+          # 把 frontend/dist/ 排除在构建上下文之外，不处理则构建必失败。
+          # 旧流程是整个 .dockerignore 移开；这里只删两行，等效且更安全：
+          # 其余排除（node_modules、sessions、data、*.sqlite 等）继续生效，
+          # 上下文里不含运行时数据与秘密。
+          # 另删 Dockerfile.* 一行：BuildKit 从（过滤后的）上下文里读取
+          # -f 指定的 Dockerfile，被排除会报 failed to read dockerfile。
+          sed -i -e '/^frontend\/dist\/$/d' -e '/^Dockerfile\.\*$/d' .dockerignore
+          test -d frontend/dist
+          if grep -q '^frontend/dist/$' .dockerignore; then
+            echo 'ERROR: frontend/dist/ still excluded by .dockerignore' >&2
+            exit 1
+          fi
+          if grep -q '^Dockerfile\.\*$' .dockerignore; then
+            echo 'ERROR: Dockerfile.* still excluded by .dockerignore' >&2
+            exit 1
+          fi
+          ls frontend/dist | head
+
+      - name: Compute tags and version
+        id: vars
+        shell: bash
+        run: |
+          owner="$(echo "${GITHUB_REPOSITORY_OWNER}" | tr '[:upper:]' '[:lower:]')"
+          echo "image=ghcr.io/${owner}/tg-signpulse" >> "${GITHUB_OUTPUT}"
+          echo "short_sha=${GITHUB_SHA::12}" >> "${GITHUB_OUTPUT}"
+          app_version="$(sed -n 's/^__version__[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' tg_signer/__init__.py | head -1)"
+          if [[ -z "${app_version}" ]]; then
+            app_version="$(sed -n "s/^__version__[[:space:]]*=[[:space:]]*'\([^']*\)'.*/\1/p" tg_signer/__init__.py | head -1)"
+          fi
+          if [[ -z "${app_version}" ]]; then
+            app_version="2.7.0"
+          fi
+          echo "app_version=${app_version}" >> "${GITHUB_OUTPUT}"
+          echo "build_time=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "${GITHUB_OUTPUT}"
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: Dockerfile.vps
+          push: true
+          platforms: linux/amd64
+          tags: |
+            ${{ steps.vars.outputs.image }}:latest
+            ${{ steps.vars.outputs.image }}:sha-${{ steps.vars.outputs.short_sha }}
+          build-args: |
+            GIT_SHA=${{ github.sha }}
+            GIT_BRANCH=${{ github.ref_name }}
+            APP_VERSION=${{ steps.vars.outputs.app_version }}
+            BUILD_TIME=${{ steps.vars.outputs.build_time }}
