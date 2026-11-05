@@ -35,6 +35,10 @@ export default defineConfig({
       },
       workbox: {
         globPatterns: ['**/*.{js,css,html,ico,png,svg}'],
+        // index.html 不进 precache：入口必须每次走网络取最新版，否则
+        // 部署后 SW 仍会提供旧 index.html，旧 chunk 文件名已不存在，
+        // 页面跳转即空白。带哈希的静态资源仍走 precache。
+        globIgnores: ['**/index.html'],
         // 注意：这里刻意不配 runtimeCaching 缓存 /api/*。
         // 之前配过 NetworkFirst 缓存常规 GET API：Service Worker 会把
         // /api/proxies 这类动态列表响应也写进 api-cache，同步完成前

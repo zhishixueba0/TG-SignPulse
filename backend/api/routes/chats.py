@@ -82,7 +82,7 @@ class PressChatButtonRequest(BaseModel):
 
 
 class PressChatButtonResponse(BaseModel):
-    action: str  # url | callback
+    action: str  # url | callback | sent（回复键盘按钮代发文案）
     message: str = ""
     alert: bool = False
     url: Optional[str] = None
@@ -191,7 +191,7 @@ async def press_chat_button(
     request: PressChatButtonRequest,
     current_user: User = Depends(get_current_user),
 ):
-    """点一条消息的内联键盘按钮。链接按钮返回 url；回调按钮调 Telegram 回调。"""
+    """点一条消息的键盘按钮。链接按钮返回 url；回调按钮调 Telegram 回调；回复键盘按钮代发文案，返回 sent。"""
     try:
         account_name = validate_storage_name(account_name, field_name="account_name")
         result = await get_telegram_service().press_chat_button(

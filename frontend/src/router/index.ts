@@ -2,6 +2,7 @@ import { createRouter, createWebHistory } from 'vue-router'
 import Layout from '../views/Layout.vue'
 import { useAuthStore } from '../stores/auth'
 import { resolveAuthRedirect } from '../lib/auth-guard'
+import { isChunkLoadError, reloadOnceForChunkError } from '../lib/chunk-reload'
 
 const router = createRouter({
   history: createWebHistory(),
@@ -50,6 +51,14 @@ const router = createRouter({
 router.beforeEach((to) => {
   const authStore = useAuthStore()
   return resolveAuthRedirect(typeof to.name === 'string' ? to.name : null, authStore)
+})
+
+// chunk 加载失败（部署后旧 chunk 文件名已不存在）时硬刷新一次取新版入口，
+// 避免导航失败后页面空白卡死；60 秒内只刷新一次，防循环。
+router.onError((error) => {
+  if (isChunkLoadError(error)) {
+    reloadOnceForChunkError()
+  }
 })
 
 export default router

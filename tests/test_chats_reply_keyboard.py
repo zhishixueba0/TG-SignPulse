@@ -175,17 +175,40 @@ class TestListMessagesKeyboardTypes:
         assert messages[2]["buttons"] == []
 
     @pytest.mark.asyncio
-    async def test_press_reply_button_is_not_found(self, svc):
+    async def test_press_reply_button_sends_text(self, svc):
+        # 旧版前端没有回复分支，会把回复按钮发到点按接口；服务端代发文案。
         _make_session(svc, "a")
         msg = make_reply_keyboard_message(message_id=10, buttons=[["OK"]])
         fake_client = MagicMock()
         fake_client.get_messages = AsyncMock(return_value=msg)
+        fake_client.send_message = AsyncMock(
+            return_value=SimpleNamespace(id=99, date=None, text="OK")
+        )
+        fake_client.request_callback_answer = AsyncMock()
+        with (
+            patch.object(svc, "_build_account_client", return_value=(fake_client, {})),
+            patch.object(svc, "verify_account_proxy", new=AsyncMock(return_value=None)),
+        ):
+            result = await svc.press_chat_button("a", "spambot", 10, 0, 0)
+        assert result == {"action": "sent", "message": ""}
+        fake_client.send_message.assert_awaited_once_with("spambot", "OK")
+        fake_client.request_callback_answer.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_press_unknown_button_still_not_found(self, svc):
+        # 内联与回复里都找不到的按钮仍报 BUTTON_NOT_FOUND，且不代发任何内容。
+        _make_session(svc, "a")
+        msg = make_reply_keyboard_message(message_id=10, buttons=[["OK"]])
+        fake_client = MagicMock()
+        fake_client.get_messages = AsyncMock(return_value=msg)
+        fake_client.send_message = AsyncMock()
         with (
             patch.object(svc, "_build_account_client", return_value=(fake_client, {})),
             patch.object(svc, "verify_account_proxy", new=AsyncMock(return_value=None)),
         ):
             with pytest.raises(ValueError, match="BUTTON_NOT_FOUND"):
-                await svc.press_chat_button("a", "spambot", 10, 0, 0)
+                await svc.press_chat_button("a", "spambot", 10, 5, 5)
+        fake_client.send_message.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_press_inline_callback_unchanged(self, svc):
@@ -246,3 +269,32 @@ class TestMessagesRouteKeyboardType:
         assert item["keyboard_type"] == "reply"
         assert item["buttons"][0]["kind"] == "reply"
         assert item["buttons"][0]["text"] == "OK"
+
+
+class TestPressRouteSentAction:
+    def test_press_reply_button_route_returns_sent(self, api_client, db):  # noqa: F811
+        token = _login(api_client)
+        svc = MagicMock()
+        svc.press_chat_button = AsyncMock(
+            return_value={"action": "sent", "message": ""}
+        )
+        with patch("backend.api.routes.chats.get_telegram_service", return_value=svc):
+            resp = api_client.post(
+                "/api/chats/a1/button",
+                json={
+                    "chat_id": "178000000",
+                    "message_id": 10,
+                    "row": 0,
+                    "col": 0,
+                },
+                headers=_auth(token),
+            )
+        assert resp.status_code == 200
+        assert resp.json() == {
+            "action": "sent",
+            "message": "",
+            "alert": False,
+            "url": None,
+        }
+        # chat_id 是 int | str：纯数字字符串会被 pydantic 转成 int 再传给 service。
+        svc.press_chat_button.assert_awaited_once_with("a1", 178000000, 10, 0, 0)

@@ -416,9 +416,9 @@ class TelegramChatsMixin:
         request_callback_answer（按按钮的 callback_data 发送，不按文本
         发送），返回 Bot 的回答文本/是否弹窗/跳转链接。只操作用户点的
         这一个按钮，不批量、不代发其他内容。
-        回复键盘按钮不在这里处理：它在 _message_buttons 里找不到，
-        会报 BUTTON_NOT_FOUND；前端点回复键盘按钮时直接调发消息接口
-        把按钮文案当文本发出去。
+        回复键盘按钮正常由前端直接调发消息接口（点按即把按钮文案
+        当文本发出去）；旧版前端没有回复分支、误把回复按钮发到这里时，
+        这里代发按钮文案并返回 action="sent"，而不是只报 BUTTON_NOT_FOUND。
         """
         account_name = self._normalize_account_name(account_name)
         if not self.account_exists(account_name):
@@ -446,7 +446,26 @@ class TelegramChatsMixin:
                 None,
             )
             if match is None:
-                raise ValueError("BUTTON_NOT_FOUND")
+                # 回复键盘兜底：旧版前端没有回复分支，会把回复按钮发到
+                # 点按接口；点回复按钮的语义就是把文案当文本发出去，
+                # 这里直接代发，旧客户端点按后不再只看到 BUTTON_NOT_FOUND。
+                # 注意：已持有账号锁，不要调 send_chat_message（会重入取锁），
+                # 直接用已打开的 client 发送。
+                reply_match = next(
+                    (
+                        b
+                        for b in _message_reply_keyboard(msg)
+                        if b["row"] == row and b["col"] == col
+                    ),
+                    None,
+                )
+                if reply_match is None:
+                    raise ValueError("BUTTON_NOT_FOUND")
+                content = (reply_match["text"] or "").strip()
+                if not content or len(content) > 4096:
+                    raise ValueError("BUTTON_NOT_FOUND")
+                await client.send_message(target, content)
+                return {"action": "sent", "message": ""}
             if match["kind"] == "url":
                 return {"action": "url", "url": match["url"]}
             # 回调按钮：取原始 callback_data（_message_buttons 只保留了

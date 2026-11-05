@@ -356,6 +356,21 @@ if _openapi_url is None:
         return JSONResponse(status_code=404, content={"detail": "Not Found"})
 
 
+# 入口文件（index.html / SW 脚本 / manifest）必须每次重新验证：
+# 部署后 chunk 文件名按内容哈希变化，旧 index.html 或旧 SW 会让
+# 浏览器继续请求已不存在的旧 chunk，页面跳转即空白。带哈希的 /assets
+# 文件本身内容不可变，缓存无害，不在这里动。
+_NO_STORE_WEB_FILES = frozenset(
+    {"index.html", "sw.js", "registerSW.js", "manifest.webmanifest"}
+)
+
+
+def _spa_file_response(path: Path) -> FileResponse:
+    if path.name in _NO_STORE_WEB_FILES:
+        return FileResponse(path, headers={"Cache-Control": "no-store"})
+    return FileResponse(path)
+
+
 # Catch-all 路由：处理所有前端路由，返回 index.html
 # 注意：若启用了 API 文档，FastAPI 的 /docs、/redoc 在此路由之前已自动注册；
 # 默认未启用时，这些前端路径由 SPA 兜底并交由前端 404 页面友好展示。
@@ -370,17 +385,17 @@ async def serve_spa(full_path: str):
     # 检查是否是静态文件请求（带路径遍历防护）
     file_path = _resolve_web_file(full_path)
     if file_path is not None:
-        return FileResponse(file_path)
+        return _spa_file_response(file_path)
 
     # 尝试添加 .html 后缀
     html_path = _resolve_web_file(f"{full_path}.html")
     if html_path is not None:
-        return FileResponse(html_path)
+        return _spa_file_response(html_path)
 
     # 否则返回 index.html（SPA 路由）
     index_path = web_dir / "index.html"
     if index_path.exists():
-        return FileResponse(index_path)
+        return _spa_file_response(index_path)
 
     # 如果 index.html 也不存在，开发模式下重定向到前端开发服务器，生产环境返回 404
     if os.getenv("FRONTEND_DEV_SERVER_URL"):
