@@ -1,11 +1,11 @@
 # TG-SignPulse v2.7.0（GitHub 源码自建），与旧版 1.0.130 并行。
 # 旧版：/opt/tg-signpulse，容器 tg-signpulse，127.0.0.1:18765，不动。
-# 本版：/opt/fork-tg-signpulse，容器 tg-signpulse-v270，127.0.0.1:18766，数据卷独立。
+# 本版：/opt/fork-tg-signpulse，容器 fork-tg-signpulse，127.0.0.1:18766，数据卷独立。
 # telegram-manager：/opt/telegram-manager，127.0.0.1:8000，不动。
 services:
   app:
     image: ghcr.io/zhishixueba0/tg-signpulse:latest
-    container_name: tg-signpulse-v270
+    container_name: fork-tg-signpulse
     ports:
       - "127.0.0.1:18766:8080"
     mem_limit: 1g
