@@ -50,8 +50,10 @@ class _Dummy(TelegramQrLoginMixin):
     async def _apply_migrate_auth(self, client, data):
         pass
 
-    async def _persist_client_session(self, client, account_name, proxy):
-        self._persisted = (account_name, proxy)
+    async def _persist_client_session(
+        self, client, account_name, proxy=None, proxy_id=None, proxy_mode=None
+    ):
+        self._persisted = (account_name, proxy, proxy_id, proxy_mode)
 
     async def _finalize_qr_login_success(self, login_id, data, me):
         return {"status": "success", "user_id": getattr(me, "id", None)}
@@ -69,7 +71,7 @@ async def test_persist_qr_authorized_without_2fa_completes():
     me = await dummy._persist_qr_authorized(client, data, "login1", user)
 
     assert me is user
-    assert dummy._persisted == ("acc", "socks5://x")
+    assert dummy._persisted == ("acc", "socks5://x", None, None)
     assert data.get("status") != "password_required"
 
 
@@ -91,7 +93,7 @@ async def test_persist_qr_authorized_does_not_probe_password_api():
     assert me is user
     assert not client.get_password.called
     assert data.get("status") != "password_required"
-    assert dummy._persisted == ("acc", "socks5://x")
+    assert dummy._persisted == ("acc", "socks5://x", None, None)
 
 
 @pytest.mark.asyncio
