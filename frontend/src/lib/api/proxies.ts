@@ -90,6 +90,8 @@ export interface TestProxyResponse {
   latency_ms: number | null
   detail: string
   last_test_ok: boolean | null
+  /** TCP 端口是否接通（与可用与否无关）：端口通但握手失败时为 true。 */
+  tcp_ok?: boolean
 }
 
 /** 检测 / 清理类后台任务进度 */
@@ -151,6 +153,7 @@ export interface TestGlobalProxyResponse {
   success: boolean
   ok: boolean
   detail: string
+  tcp_ok?: boolean
 }
 
 export const listProxies = (token: string) =>

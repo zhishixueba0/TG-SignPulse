@@ -1,17 +1,21 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { MessageSquareText, RefreshCw, Send } from 'lucide-vue-next'
+import { MessageSquareText, RefreshCw, Send, X } from 'lucide-vue-next'
 import { getAuthToken } from '../lib/api/core'
 import {
+  fetchChatMediaBlob,
   listChatDialogs,
   listChatMessages,
+  pressChatButton,
   sendChatMessage,
+  type ChatButton,
   type ChatDialog,
   type ChatMessage,
 } from '../lib/api'
 import { useAccountsStore } from '../stores/accounts'
 import { useI18n } from '../composables/useI18n'
+import { useToast } from '../composables/useToast'
 import { notifyApiError } from '../lib/notify'
 import { sortChatMessagesAsc, truncateDialogPreview } from '../lib/chat-map'
 import { devLog } from '../lib/devLog'
@@ -19,6 +23,7 @@ import { devLog } from '../lib/devLog'
 const route = useRoute()
 const router = useRouter()
 const { t } = useI18n()
+const toast = useToast()
 const accountsStore = useAccountsStore()
 
 const accountNames = ref<string[]>([])
@@ -33,6 +38,76 @@ const messagesError = ref(false)
 const sending = ref(false)
 const draft = ref('')
 const messagesBox = ref<HTMLElement | null>(null)
+const mediaUrls = ref(new Map<number, string>())
+const fullImageUrl = ref('')
+const fullImageLoading = ref(false)
+const pressingButton = ref(false)
+
+const clearMediaUrls = () => {
+  for (const url of mediaUrls.value.values()) URL.revokeObjectURL(url)
+  mediaUrls.value.clear()
+  if (fullImageUrl.value) {
+    URL.revokeObjectURL(fullImageUrl.value)
+    fullImageUrl.value = ''
+  }
+}
+
+const mediaThumbUrl = (msg: ChatMessage): string | undefined =>
+  msg.id == null ? undefined : mediaUrls.value.get(msg.id)
+
+const loadMediaThumbs = async () => {
+  const token = getAuthToken()
+  if (!token || !selectedAccount.value || selectedChatId.value === null) return
+  for (const msg of messages.value) {
+    if (msg.media_type !== 'photo' || msg.id == null || mediaUrls.value.has(msg.id)) continue
+    try {
+      const blob = await fetchChatMediaBlob(token, selectedAccount.value, selectedChatId.value, msg.id, true)
+      mediaUrls.value.set(msg.id, URL.createObjectURL(blob))
+    } catch (e: unknown) {
+      devLog.error('Failed to load chat image thumbnail', e)
+    }
+  }
+}
+
+const openFullImage = async (msg: ChatMessage) => {
+  const token = getAuthToken()
+  if (!token || !selectedAccount.value || selectedChatId.value === null || msg.id == null || fullImageLoading.value) return
+  fullImageLoading.value = true
+  try {
+    const blob = await fetchChatMediaBlob(token, selectedAccount.value, selectedChatId.value, msg.id, false)
+    if (fullImageUrl.value) URL.revokeObjectURL(fullImageUrl.value)
+    fullImageUrl.value = URL.createObjectURL(blob)
+  } catch (e: unknown) {
+    notifyApiError(e, 'chats.imageLoadFailed')
+  } finally {
+    fullImageLoading.value = false
+  }
+}
+
+const closeFullImage = () => {
+  if (fullImageUrl.value) URL.revokeObjectURL(fullImageUrl.value)
+  fullImageUrl.value = ''
+}
+
+const handlePressButton = async (msg: ChatMessage, button: ChatButton) => {
+  const token = getAuthToken()
+  if (!token || !selectedAccount.value || selectedChatId.value === null || msg.id == null || pressingButton.value) return
+  pressingButton.value = true
+  try {
+    const res = await pressChatButton(token, selectedAccount.value, selectedChatId.value, msg.id, button.row, button.col)
+    if (res.action === 'url' && res.url) {
+      window.open(res.url, '_blank', 'noopener')
+      return
+    }
+    if (res.message) toast.info(res.message)
+    // 回调可能让机器人发来新消息或改消息，刷新一次。
+    await loadMessages()
+  } catch (e: unknown) {
+    notifyApiError(e, 'chats.pressButtonFailed')
+  } finally {
+    pressingButton.value = false
+  }
+}
 
 const selectedDialog = computed(
   () => dialogs.value.find((d) => String(d.chat_id) === String(selectedChatId.value)) ?? null,
@@ -103,6 +178,7 @@ const loadMessages = async () => {
     const res = await listChatMessages(token, selectedAccount.value, selectedChatId.value)
     messages.value = sortChatMessagesAsc(res.messages)
     await scrollMessagesToBottom()
+    void loadMediaThumbs()
   } catch (e: unknown) {
     messagesError.value = true
     notifyApiError(e, 'chats.loadMessagesFailed')
@@ -114,6 +190,7 @@ const loadMessages = async () => {
 const selectChat = (dialog: ChatDialog) => {
   selectedChatId.value = dialog.chat_id
   messages.value = []
+  clearMediaUrls()
   void loadMessages()
 }
 
@@ -122,6 +199,7 @@ const onAccountChange = (e: Event) => {
   selectedChatId.value = null
   messages.value = []
   dialogs.value = []
+  clearMediaUrls()
   router.replace({ name: 'chats', query: { account: selectedAccount.value } })
   void loadDialogs()
 }
@@ -146,6 +224,10 @@ const handleSend = async () => {
 onMounted(async () => {
   await loadAccounts()
   await loadDialogs()
+})
+
+onUnmounted(() => {
+  clearMediaUrls()
 })
 </script>
 
@@ -250,7 +332,33 @@ onMounted(async () => {
                   : 'bg-black/[0.04] dark:bg-white/[0.06] text-[var(--sp-text)]'"
               >
                 <div v-if="!msg.outgoing && msg.sender_name" class="text-[11px] opacity-70 mb-0.5">{{ msg.sender_name }}</div>
+                <button
+                  v-if="msg.media_type === 'photo' && mediaThumbUrl(msg)"
+                  type="button"
+                  class="block mb-1.5 cursor-pointer"
+                  :aria-label="t('chats.viewFullImage')"
+                  :title="t('chats.viewFullImage')"
+                  @click="openFullImage(msg)"
+                >
+                  <img :src="mediaThumbUrl(msg)" :alt="t('chats.photoMessage')" class="max-w-full rounded-md">
+                </button>
+                <div v-else-if="msg.media_type === 'photo'" class="text-xs opacity-70 mb-1.5">{{ t('chats.imageLoadFailed') }}</div>
                 <div class="whitespace-pre-wrap">{{ msg.text }}</div>
+                <div v-if="msg.buttons && msg.buttons.length > 0" class="flex flex-wrap gap-1.5 mt-2">
+                  <button
+                    v-for="button in msg.buttons"
+                    :key="`${button.row}-${button.col}`"
+                    type="button"
+                    class="px-2.5 py-1 rounded-full text-xs border cursor-pointer transition-colors"
+                    :class="msg.outgoing
+                      ? 'border-white/50 text-white hover:bg-white/15'
+                      : 'border-sky-500/60 text-sky-600 dark:text-sky-400 hover:bg-sky-500/10'"
+                    :disabled="pressingButton"
+                    @click="handlePressButton(msg, button)"
+                  >
+                    {{ button.text }}
+                  </button>
+                </div>
                 <div class="text-[11px] opacity-70 mt-1 font-mono text-right">{{ formatDateTime(msg.date) }}</div>
               </div>
             </div>
@@ -278,5 +386,24 @@ onMounted(async () => {
         </template>
       </div>
     </div>
+  </div>
+
+  <!-- 图片原图查看 -->
+  <div
+    v-if="fullImageUrl"
+    class="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4 cursor-pointer"
+    role="dialog"
+    :aria-label="t('chats.viewFullImage')"
+    @click="closeFullImage"
+  >
+    <button
+      type="button"
+      class="absolute top-4 right-4 text-white cursor-pointer"
+      :aria-label="t('common.close')"
+      @click="closeFullImage"
+    >
+      <X class="w-6 h-6" />
+    </button>
+    <img :src="fullImageUrl" :alt="t('chats.photoMessage')" class="max-h-full max-w-full object-contain">
   </div>
 </template>

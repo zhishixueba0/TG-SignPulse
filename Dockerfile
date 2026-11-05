@@ -28,7 +28,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-RUN apt-get update && apt-get install -y --no-install-recommends build-essential tzdata gosu && \
+RUN apt-get update && apt-get install -y --no-install-recommends build-essential tzdata gosu libglib2.0-0 && \
   rm -rf /var/lib/apt/lists/*
 
 # 依赖单独成层：仅 pyproject.toml / uv.lock 变化才失效，
@@ -45,10 +45,10 @@ COPY tg_signer/__init__.py /app/tg_signer/__init__.py
 ARG TARGETPLATFORM
 RUN pip install --no-cache-dir uv && \
   if [ "${TARGETPLATFORM:-}" = "linux/amd64" ] || [ "$(uname -m)" = "x86_64" ]; then \
-    uv export --format requirements-txt --no-hashes --extra speedup --no-emit-project \
+    uv export --format requirements-txt --no-hashes --extra speedup --extra tdata --no-emit-project \
       -o /tmp/requirements.txt; \
   else \
-    uv export --format requirements-txt --no-hashes --no-emit-project \
+    uv export --format requirements-txt --no-hashes --extra tdata --no-emit-project \
       -o /tmp/requirements.txt; \
   fi && \
   pip install --no-cache-dir -r /tmp/requirements.txt && \

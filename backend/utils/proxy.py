@@ -85,6 +85,10 @@ class ProxyProbeOutcome:
       ``PROXY_AUTH_FAILED`` / ``PROXY_CONNECT_TIMEOUT``, ``OK``,
       ``PROXY_PROBE_FAILED``, ``PROXY_PROBE_UNAVAILABLE``,
       ``PROXY_CIRCUIT_BREAKER``).
+    * ``tcp_ok`` -- True when the proxy's TCP port was reached, even if
+      the protocol handshake failed (e.g. an HTTP-only proxy that
+      rejects CONNECT: port open, but unusable for Telegram). The
+      verdict stays fail-closed; this only explains *why* it failed.
     """
 
     status: ProxyProbeStatus
@@ -92,6 +96,7 @@ class ProxyProbeOutcome:
     latency_ms: Optional[int] = None
     cached: bool = False
     code: str = "PROXY_PROBE_UNAVAILABLE"
+    tcp_ok: bool = False
 
     def __iter__(self) -> Iterator[Tuple[ProxyProbeStatus, Optional[str]]]:
         yield self.status
@@ -501,6 +506,7 @@ async def probe_proxy_exit(
                     detail=detail,
                     latency_ms=connect_ms,
                     code="OK",
+                    tcp_ok=True,
                 )
             )
         return _record(
@@ -509,6 +515,7 @@ async def probe_proxy_exit(
                 detail=detail,
                 latency_ms=None,
                 code="PROXY_HANDSHAKE_FAILED",
+                tcp_ok=connect_ms is not None,
             )
         )
 
@@ -527,6 +534,7 @@ async def probe_proxy_exit(
                 detail=f"{handshake.code}: {handshake.message}",
                 latency_ms=handshake.latency_ms,
                 code=handshake.code,
+                tcp_ok=handshake.tcp_ok,
             )
         )
 
@@ -547,6 +555,7 @@ async def probe_proxy_exit(
                     detail="Host direct IP baseline probe unavailable",
                     latency_ms=_latency_ms(),
                     code="PROXY_PROBE_UNAVAILABLE",
+                    tcp_ok=True,
                 )
             )
         elif detected_ip == host_ip:
@@ -556,6 +565,7 @@ async def probe_proxy_exit(
                     detail=detected_ip,
                     latency_ms=_latency_ms(),
                     code="PROXY_PROBE_FAILED",
+                    tcp_ok=True,
                 )
             )
         else:
@@ -565,6 +575,7 @@ async def probe_proxy_exit(
                     detail=detected_ip,
                     latency_ms=_latency_ms(),
                     code="OK",
+                    tcp_ok=True,
                 )
             )
     return _record(
@@ -573,5 +584,6 @@ async def probe_proxy_exit(
             detail=last_err or "Connection timed out",
             latency_ms=_latency_ms(),
             code="PROXY_PROBE_UNAVAILABLE",
+            tcp_ok=True,
         )
     )

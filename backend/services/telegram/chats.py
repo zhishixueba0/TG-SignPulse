@@ -51,6 +51,52 @@ def _message_text(msg: Any) -> str:
     return getattr(msg, "text", None) or getattr(msg, "caption", None) or ""
 
 
+def _message_buttons(msg: Any) -> list:
+    """内联键盘按钮（Drive 1.0.129 press_message_button 同款语义）。
+
+    只取可操作的两种：带 url 的链接按钮与带 callback_data 的回调按钮；
+    其余类型（switch_inline 等）面板内无法执行，不返回。
+    """
+    markup = getattr(msg, "reply_markup", None)
+    rows = getattr(markup, "inline_keyboard", None) if markup is not None else None
+    if not rows:
+        return []
+    buttons = []
+    for row_idx, row in enumerate(rows):
+        for col_idx, button in enumerate(row or []):
+            text = getattr(button, "text", None) or ""
+            url = getattr(button, "url", None)
+            callback_data = getattr(button, "callback_data", None)
+            if url:
+                buttons.append(
+                    {
+                        "row": row_idx,
+                        "col": col_idx,
+                        "text": str(text),
+                        "kind": "url",
+                        "url": str(url),
+                    }
+                )
+            elif callback_data is not None:
+                buttons.append(
+                    {
+                        "row": row_idx,
+                        "col": col_idx,
+                        "text": str(text),
+                        "kind": "callback",
+                        "url": None,
+                    }
+                )
+    return buttons
+
+
+def _message_media_type(msg: Any) -> Optional[str]:
+    """目前只做图片：带 photo 即为图片消息；视频/文件以后再说。"""
+    if getattr(msg, "photo", None) is not None:
+        return "photo"
+    return None
+
+
 def _message_date_iso(msg: Any) -> Optional[str]:
     date = getattr(msg, "date", None)
     if date is None:
@@ -174,6 +220,8 @@ class TelegramChatsMixin:
                             if from_user is not None
                             else None
                         ),
+                        "media_type": _message_media_type(msg),
+                        "buttons": _message_buttons(msg),
                     }
                 )
             # get_chat_history 最新在前；消息窗按时间升序展示
@@ -234,4 +282,141 @@ class TelegramChatsMixin:
             "outgoing": True,
             "sender_name": _sender_name(sent),
             "sender_id": None,
+            "media_type": None,
+            "buttons": [],
         }
+
+    async def download_chat_media(
+        self,
+        account_name: str,
+        chat_id: Union[int, str],
+        message_id: int,
+        thumb: bool = True,
+        timeout_seconds: float = 30.0,
+    ) -> bytes:
+        """下载一条图片消息：thumb=True 取最小缩略图，否则取原图。
+
+        只做图片（视频/文件以后再说）；无图的消息返回 404 语义的
+        ValueError("MEDIA_NOT_FOUND")。返回 JPEG 字节。
+        """
+        account_name = self._normalize_account_name(account_name)
+        if not self.account_exists(account_name):
+            raise ValueError("账号不存在")
+        target = parse_chat_id(chat_id)
+        try:
+            message_id = int(message_id)
+        except (TypeError, ValueError):
+            raise ValueError("MEDIA_NOT_FOUND") from None
+
+        client, proxy_dict = self._build_account_client(account_name, no_updates=True)
+        await self.verify_account_proxy(account_name, proxy_dict)
+
+        timeout_seconds = max(1.0, min(float(timeout_seconds or 30.0), 60.0))
+
+        async def _download() -> bytes:
+            msg = await client.get_messages(target, message_id)
+            if msg is None or getattr(msg, "photo", None) is None:
+                raise ValueError("MEDIA_NOT_FOUND")
+            if thumb:
+                thumbs = list(getattr(msg.photo, "thumbs", None) or [])
+                thumbs = [t for t in thumbs if getattr(t, "file_size", None)]
+                if not thumbs:
+                    raise ValueError("MEDIA_NOT_FOUND")
+                smallest = min(thumbs, key=lambda t: int(t.file_size or 0))
+                data = await client.download_media(smallest, in_memory=True)
+            else:
+                data = await client.download_media(msg, in_memory=True)
+            if data is None:
+                raise ValueError("MEDIA_NOT_FOUND")
+            if isinstance(data, (bytes, bytearray)):
+                return bytes(data)
+            read = getattr(data, "read", None)
+            if callable(read):
+                return bytes(read())
+            raise ValueError("MEDIA_NOT_FOUND")
+
+        try:
+            async with acquire_account_lock_with_timeout(
+                account_name, timeout=timeout_seconds
+            ):
+                async with client:
+                    return await asyncio.wait_for(_download(), timeout=timeout_seconds)
+        except AccountLockTimeout as e:
+            logger.warning("下载图片获取锁超时 %s: %s", account_name, e)
+            raise AccountLockTimeout("ACCOUNT_BUSY") from e
+
+    async def press_chat_button(
+        self,
+        account_name: str,
+        chat_id: Union[int, str],
+        message_id: int,
+        row: int,
+        col: int,
+        timeout_seconds: float = 12.0,
+    ) -> Dict[str, Any]:
+        """点一条消息的内联键盘按钮（Drive 1.0.129 press_message_button 语义）。
+
+        链接按钮只返回 url（由前端打开，不代点）；回调按钮调
+        request_callback_answer（按按钮的 callback_data 发送，不按文本
+        发送），返回 Bot 的回答文本/是否弹窗/跳转链接。只操作用户点的
+        这一个按钮，不批量、不代发其他内容。
+        """
+        account_name = self._normalize_account_name(account_name)
+        if not self.account_exists(account_name):
+            raise ValueError("账号不存在")
+        target = parse_chat_id(chat_id)
+        try:
+            message_id = int(message_id)
+            row = int(row)
+            col = int(col)
+        except (TypeError, ValueError):
+            raise ValueError("BUTTON_NOT_FOUND") from None
+
+        client, proxy_dict = self._build_account_client(account_name, no_updates=True)
+        await self.verify_account_proxy(account_name, proxy_dict)
+
+        timeout_seconds = max(1.0, min(float(timeout_seconds or 12.0), 30.0))
+
+        async def _press() -> Dict[str, Any]:
+            msg = await client.get_messages(target, message_id)
+            if msg is None:
+                raise ValueError("BUTTON_NOT_FOUND")
+            buttons = _message_buttons(msg)
+            match = next(
+                (b for b in buttons if b["row"] == row and b["col"] == col),
+                None,
+            )
+            if match is None:
+                raise ValueError("BUTTON_NOT_FOUND")
+            if match["kind"] == "url":
+                return {"action": "url", "url": match["url"]}
+            # 回调按钮：取原始 callback_data（_message_buttons 只保留了
+            # kind，原始值从 reply_markup 再取一次，避免转义失真）。
+            markup = getattr(msg, "reply_markup", None)
+            rows = getattr(markup, "inline_keyboard", None) or []
+            try:
+                raw_button = rows[row][col]
+            except (IndexError, TypeError):
+                raise ValueError("BUTTON_NOT_FOUND") from None
+            callback_data = getattr(raw_button, "callback_data", None)
+            if callback_data is None:
+                raise ValueError("BUTTON_NOT_FOUND")
+            answer = await client.request_callback_answer(
+                target, message_id, callback_data
+            )
+            return {
+                "action": "callback",
+                "message": getattr(answer, "message", None) or "",
+                "alert": bool(getattr(answer, "alert", False)),
+                "url": getattr(answer, "url", None),
+            }
+
+        try:
+            async with acquire_account_lock_with_timeout(
+                account_name, timeout=timeout_seconds
+            ):
+                async with client:
+                    return await asyncio.wait_for(_press(), timeout=timeout_seconds)
+        except AccountLockTimeout as e:
+            logger.warning("点按钮获取锁超时 %s: %s", account_name, e)
+            raise AccountLockTimeout("ACCOUNT_BUSY") from e

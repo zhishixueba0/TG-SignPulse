@@ -40,6 +40,17 @@ describe('account-list-map', () => {
     expect(filterAccountsByQuery(list, '')).toHaveLength(2)
   })
 
+  it('filters by first_name (Telegram 账户名)', () => {
+    const list = [
+      { name: '12098814721', remark: '', message: '', raw: { first_name: 'Nora', username: 'nora_h', phone: '12098814721' } },
+      { name: '918238678713', remark: '', message: '', raw: { first_name: 'Alex', username: 'alex', phone: '918238678713' } },
+    ]
+    expect(filterAccountsByQuery(list, 'nora')).toHaveLength(1)
+    expect(filterAccountsByQuery(list, 'nora')[0].name).toBe('12098814721')
+    expect(filterAccountsByQuery(list, 'alex')).toHaveLength(1)
+    expect(filterAccountsByQuery(list, '12098814721')).toHaveLength(1)
+  })
+
   it("sorts account names with natural numeric order", () => {
     const names = ["11", "1", "9", "账号11", "账号9", "账号1"]
     names.sort(compareAccountNames)

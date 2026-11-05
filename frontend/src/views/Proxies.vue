@@ -313,8 +313,11 @@ const handleTestProxy = async (p: ProxyItem) => {
     p.latency_ms = res.latency_ms
     p.last_test_ok = res.last_test_ok
     p.last_tested_at = new Date().toISOString()
+    // TCP 维度：端口通但握手失败时，明确说明端口是通的（不是线路全断），
+    // 结论仍是不可用——绝不把 verdict 降级成“可用”。
+    const tcpNote = !res.ok && res.tcp_ok ? `（${t('proxies.tcpPortOpen')}）` : ''
     if (res.ok) toast.success(res.detail || t('proxies.testOk'))
-    else toast.error(res.detail || t('proxies.testFail'))
+    else toast.error((res.detail || t('proxies.testFail')) + tcpNote)
   } catch (e: unknown) {
     notifyApiError(e, 'proxies.testFailed')
   } finally {
@@ -655,8 +658,9 @@ const testGlobalProxyNow = async () => {
   globalTesting.value = true
   try {
     const res = await testGlobalProxy(token)
+    const tcpNote = !res.ok && res.tcp_ok ? `（${t('proxies.tcpPortOpen')}）` : ''
     if (res.ok) toast.success(res.detail || t('proxies.globalTestOk'))
-    else toast.error(res.detail || t('proxies.globalTestFail'))
+    else toast.error((res.detail || t('proxies.globalTestFail')) + tcpNote)
   } catch (e: unknown) {
     notifyApiError(e, 'proxies.globalTestFailed')
   } finally {

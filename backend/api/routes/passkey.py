@@ -276,6 +276,8 @@ async def _complete_login(
     proxy_url: Optional[str],
     remark: Optional[str],
     is_custom: bool,
+    proxy_id: Optional[str] = None,
+    proxy_mode: Optional[str] = None,
 ) -> dict:
     """Finish a successful Telethon passkey login: convert the session,
     verify it with a real Kurigram get_me, persist it, create the
@@ -319,6 +321,8 @@ async def _complete_login(
             proxy=proxy_url,
             api_id=api_id,
             api_hash=api_hash,
+            proxy_id=proxy_id,
+            proxy_mode=proxy_mode,
         )
     except ValueError as e:
         err_msg = str(e)
@@ -355,6 +359,8 @@ class PasskeyLoginIn(BaseModel):
     api_id: Optional[int] = None
     api_hash: Optional[str] = None
     proxy: Optional[str] = None
+    proxy_id: Optional[str] = None
+    proxy_mode: Optional[str] = None
     account_name: Optional[str] = None
     remark: Optional[str] = None
     password: Optional[str] = None  # 2FA password, only if the account has one
@@ -413,7 +419,15 @@ async def passkey_login(
             "decoded DC:userId form",
         )
     api_id, api_hash, is_custom = _resolve_api(body.api_id, body.api_hash)
-    proxy_kwargs = _telethon_proxy_kwargs(body.proxy)
+    from backend.services.telegram.login_proxy import resolve_login_proxy
+
+    try:
+        selection = resolve_login_proxy(
+            proxy=body.proxy, proxy_id=body.proxy_id, proxy_mode=body.proxy_mode
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    proxy_kwargs = _telethon_proxy_kwargs(selection.proxy_url)
     _prune_pending()
 
     tmpdir = tempfile.mkdtemp(prefix="tg-passkey-", dir="/tmp")
@@ -510,7 +524,9 @@ async def passkey_login(
                     "session_path": session_path,
                     "api_id": api_id,
                     "api_hash": api_hash,
-                    "proxy": body.proxy,
+                    "proxy": selection.proxy_url,
+                    "proxy_id": selection.proxy_id,
+                    "proxy_mode": selection.mode,
                     "account_name": body.account_name,
                     "remark": body.remark,
                     "is_custom": is_custom,
@@ -531,9 +547,11 @@ async def passkey_login(
             api_hash,
             me,
             body.account_name,
-            body.proxy,
+            selection.proxy_url,
             body.remark,
             is_custom,
+            proxy_id=selection.proxy_id,
+            proxy_mode=selection.mode,
         )
     except HTTPException:
         raise
@@ -588,6 +606,8 @@ async def passkey_password(
             pending.get("proxy"),
             pending.get("remark"),
             bool(pending.get("is_custom", False)),
+            proxy_id=pending.get("proxy_id"),
+            proxy_mode=pending.get("proxy_mode"),
         )
     except HTTPException:
         raise

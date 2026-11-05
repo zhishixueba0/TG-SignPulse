@@ -42,6 +42,7 @@ PROXY_TEST_MESSAGES: dict[str, str] = {
     "PROXY_AUTH_UNSUPPORTED": "代理认证方式不受支持",
     "PROXY_AUTH_FAILED": "代理认证失败：用户名或密码错误",
     "PROXY_TUNNEL_REJECTED": "代理拒绝转发到 Telegram（出口受限或线路已失效）",
+    "PROXY_CONNECT_UNSUPPORTED": "代理不支持 CONNECT 隧道：该代理只转发普通 HTTP 请求，无法用于 Telegram",
     "PROXY_HANDSHAKE_FAILED": "代理回应异常（协议可能选错：HTTP 与 SOCKS 混用）",
     "PROXY_PROTOCOL_UNSUPPORTED": "不支持的代理协议",
 }
@@ -53,10 +54,19 @@ class HandshakeResult:
     code: str
     message: str
     latency_ms: Optional[int] = None
+    # TCP 端口是否接通（与握手成功与否无关）：端口通但 CONNECT 被拒时
+    # tcp_ok=True，面板据此说明“端口通、但该代理不能承载 Telegram”，
+    # 而不是把 verdict 降级成“可用”——失败仍要失败关闭。
+    tcp_ok: bool = False
 
 
 def _result(
-    ok: bool, code: str, started: float, *, latency_ms: Optional[int] = None
+    ok: bool,
+    code: str,
+    started: float,
+    *,
+    latency_ms: Optional[int] = None,
+    tcp_ok: bool = False,
 ) -> HandshakeResult:
     if latency_ms is None:
         latency_ms = max(int((time.monotonic() - started) * 1000), 0)
@@ -65,6 +75,7 @@ def _result(
         code=code,
         message=PROXY_TEST_MESSAGES.get(code, code),
         latency_ms=latency_ms,
+        tcp_ok=tcp_ok,
     )
 
 
@@ -102,6 +113,9 @@ async def _probe_http(
         )
     except Exception as exc:
         return _result(False, _classify_connect_error(exc), started)
+    # TCP 已接通：此后一切失败都带 tcp_ok=True，面板可据此区分
+    # “端口不通”和“端口通但不支持 CONNECT”。
+    tcp_ok = True
     try:
         lines = [
             f"CONNECT {_PROBE_TARGET_HOST}:{_PROBE_TARGET_PORT} HTTP/1.1",
@@ -121,21 +135,27 @@ async def _probe_http(
                 reader.readuntil(b"\r\n\r\n"), timeout=timeout
             )
         except (asyncio.LimitOverrunError, ValueError):
-            return _result(False, "PROXY_HANDSHAKE_FAILED", started)
+            return _result(False, "PROXY_HANDSHAKE_FAILED", started, tcp_ok=tcp_ok)
         except Exception as exc:
-            return _result(False, _classify_connect_error(exc), started)
+            return _result(False, _classify_connect_error(exc), started, tcp_ok=tcp_ok)
         if len(raw_head) > 8192:
-            return _result(False, "PROXY_HANDSHAKE_FAILED", started)
+            return _result(False, "PROXY_HANDSHAKE_FAILED", started, tcp_ok=tcp_ok)
         first_line = raw_head.split(b"\r\n", 1)[0].decode("latin-1", "ignore")
         parts = first_line.split()
         if len(parts) < 2 or not parts[1].isdigit():
-            return _result(False, "PROXY_HANDSHAKE_FAILED", started)
+            return _result(False, "PROXY_HANDSHAKE_FAILED", started, tcp_ok=tcp_ok)
         status = int(parts[1])
         if status == 200:
-            return _result(True, "OK", started)
+            return _result(True, "OK", started, tcp_ok=tcp_ok)
         if status == 407:
-            return _result(False, "PROXY_AUTH_FAILED", started)
-        return _result(False, "PROXY_TUNNEL_REJECTED", started)
+            return _result(False, "PROXY_AUTH_FAILED", started, tcp_ok=tcp_ok)
+        if status in (400, 404, 405, 501):
+            # 只转发普通 HTTP、不支持 CONNECT 隧道的代理：对任何 CONNECT
+            # 都回 400/405 之类，但普通 HTTP GET 能正常转发。它无法承载
+            # TLS/MTProto，任何 Telegram 客户端都用不了——判失败是正确的，
+            # 只把原因说清楚，并让面板展示“端口通”。
+            return _result(False, "PROXY_CONNECT_UNSUPPORTED", started, tcp_ok=tcp_ok)
+        return _result(False, "PROXY_TUNNEL_REJECTED", started, tcp_ok=tcp_ok)
     finally:
         try:
             writer.close()
@@ -157,6 +177,7 @@ async def _probe_socks5(
         )
     except Exception as exc:
         return _result(False, _classify_connect_error(exc), started)
+    tcp_ok = True
     try:
         try:
             if user:
@@ -168,16 +189,16 @@ async def _probe_socks5(
                 _read_exactly(reader, 2), timeout=timeout
             )
             if ver != 0x05:
-                return _result(False, "PROXY_HANDSHAKE_FAILED", started)
+                return _result(False, "PROXY_HANDSHAKE_FAILED", started, tcp_ok=tcp_ok)
             if method == 0xFF:
-                return _result(False, "PROXY_AUTH_UNSUPPORTED", started)
+                return _result(False, "PROXY_AUTH_UNSUPPORTED", started, tcp_ok=tcp_ok)
             if method == 0x02:
                 if not user:
-                    return _result(False, "PROXY_AUTH_REQUIRED", started)
+                    return _result(False, "PROXY_AUTH_REQUIRED", started, tcp_ok=tcp_ok)
                 user_b = str(user).encode("utf-8")
                 pass_b = str(password or "").encode("utf-8")
                 if len(user_b) > 255 or len(pass_b) > 255:
-                    return _result(False, "PROXY_AUTH_FAILED", started)
+                    return _result(False, "PROXY_AUTH_FAILED", started, tcp_ok=tcp_ok)
                 writer.write(
                     b"\x01"
                     + bytes([len(user_b)])
@@ -190,9 +211,9 @@ async def _probe_socks5(
                     _read_exactly(reader, 2), timeout=timeout
                 )
                 if auth_ver != 0x01 or auth_status != 0x00:
-                    return _result(False, "PROXY_AUTH_FAILED", started)
+                    return _result(False, "PROXY_AUTH_FAILED", started, tcp_ok=tcp_ok)
             elif method != 0x00:
-                return _result(False, "PROXY_AUTH_UNSUPPORTED", started)
+                return _result(False, "PROXY_AUTH_UNSUPPORTED", started, tcp_ok=tcp_ok)
 
             target = _PROBE_TARGET_HOST.encode("ascii")
             writer.write(
@@ -206,7 +227,7 @@ async def _probe_socks5(
                 _read_exactly(reader, 4), timeout=timeout
             )
             if resp_ver != 0x05:
-                return _result(False, "PROXY_HANDSHAKE_FAILED", started)
+                return _result(False, "PROXY_HANDSHAKE_FAILED", started, tcp_ok=tcp_ok)
             if rep == 0x00:
                 # Drain the bound address, then the handshake is proven.
                 if atyp == 0x01:
@@ -220,16 +241,16 @@ async def _probe_socks5(
                     )
                 elif atyp == 0x04:
                     await asyncio.wait_for(_read_exactly(reader, 18), timeout=timeout)
-                return _result(True, "OK", started)
+                return _result(True, "OK", started, tcp_ok=tcp_ok)
             if rep in (0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08):
-                return _result(False, "PROXY_TUNNEL_REJECTED", started)
-            return _result(False, "PROXY_HANDSHAKE_FAILED", started)
+                return _result(False, "PROXY_TUNNEL_REJECTED", started, tcp_ok=tcp_ok)
+            return _result(False, "PROXY_HANDSHAKE_FAILED", started, tcp_ok=tcp_ok)
         except (asyncio.TimeoutError, TimeoutError):
-            return _result(False, "PROXY_CONNECT_TIMEOUT", started)
+            return _result(False, "PROXY_CONNECT_TIMEOUT", started, tcp_ok=tcp_ok)
         except (asyncio.IncompleteReadError, ConnectionError, OSError) as exc:
-            return _result(False, _classify_connect_error(exc), started)
+            return _result(False, _classify_connect_error(exc), started, tcp_ok=tcp_ok)
         except Exception:
-            return _result(False, "PROXY_HANDSHAKE_FAILED", started)
+            return _result(False, "PROXY_HANDSHAKE_FAILED", started, tcp_ok=tcp_ok)
     finally:
         try:
             writer.close()
@@ -265,6 +286,7 @@ async def _probe_socks4(
         )
     except Exception as exc:
         return _result(False, _classify_connect_error(exc), started)
+    tcp_ok = True
     try:
         try:
             user = str(proxy_dict.get("username") or "")
@@ -287,18 +309,18 @@ async def _probe_socks4(
             except Exception:
                 pass
             if status == 90:
-                return _result(True, "OK", started)
+                return _result(True, "OK", started, tcp_ok=tcp_ok)
             if status == 93:
-                return _result(False, "PROXY_AUTH_FAILED", started)
+                return _result(False, "PROXY_AUTH_FAILED", started, tcp_ok=tcp_ok)
             if status == 91:
-                return _result(False, "PROXY_TUNNEL_REJECTED", started)
-            return _result(False, "PROXY_TUNNEL_REJECTED", started)
+                return _result(False, "PROXY_TUNNEL_REJECTED", started, tcp_ok=tcp_ok)
+            return _result(False, "PROXY_TUNNEL_REJECTED", started, tcp_ok=tcp_ok)
         except (asyncio.TimeoutError, TimeoutError):
-            return _result(False, "PROXY_CONNECT_TIMEOUT", started)
+            return _result(False, "PROXY_CONNECT_TIMEOUT", started, tcp_ok=tcp_ok)
         except (asyncio.IncompleteReadError, ConnectionError, OSError) as exc:
-            return _result(False, _classify_connect_error(exc), started)
+            return _result(False, _classify_connect_error(exc), started, tcp_ok=tcp_ok)
         except Exception:
-            return _result(False, "PROXY_HANDSHAKE_FAILED", started)
+            return _result(False, "PROXY_HANDSHAKE_FAILED", started, tcp_ok=tcp_ok)
     finally:
         try:
             writer.close()

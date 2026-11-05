@@ -213,3 +213,84 @@ async def test_unsupported_scheme():
     )
     assert result.ok is False
     assert result.code == "PROXY_PROTOCOL_UNSUPPORTED"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status", [400, 405, 501])
+async def test_http_connect_unsupported_tcp_ok_fail_closed(status):
+    """HTTP-only proxies (no CONNECT support) answer 400/405/501.
+
+    The verdict stays failed (fail closed: such a proxy cannot carry
+    Telegram), but the code says WHY and tcp_ok=True says the port is
+    reachable -- the panel shows both dimensions instead of downgrading
+    the verdict to "reachable" like telegram-manager's TCP-only test.
+    """
+
+    async def handler(reader, writer):
+        await reader.readuntil(b"\r\n\r\n")
+        writer.write(f"HTTP/1.1 {status} Bad Request\r\n\r\n".encode("ascii"))
+        await writer.drain()
+        writer.close()
+
+    server, port = await _serve(handler)
+    try:
+        result = await probe_telegram_handshake(
+            {"scheme": "http", "hostname": "127.0.0.1", "port": port},
+            timeout=PROBE_HANDSHAKE_TIMEOUT_SECONDS,
+        )
+    finally:
+        server.close()
+    assert result.ok is False
+    assert result.code == "PROXY_CONNECT_UNSUPPORTED"
+    assert result.tcp_ok is True
+
+
+@pytest.mark.asyncio
+async def test_http_connect_502_stays_tunnel_rejected_with_tcp_ok():
+    async def handler(reader, writer):
+        await reader.readuntil(b"\r\n\r\n")
+        writer.write(b"HTTP/1.1 502 Bad Gateway\r\n\r\n")
+        await writer.drain()
+        writer.close()
+
+    server, port = await _serve(handler)
+    try:
+        result = await probe_telegram_handshake(
+            {"scheme": "http", "hostname": "127.0.0.1", "port": port},
+            timeout=PROBE_HANDSHAKE_TIMEOUT_SECONDS,
+        )
+    finally:
+        server.close()
+    assert result.ok is False
+    assert result.code == "PROXY_TUNNEL_REJECTED"
+    assert result.tcp_ok is True
+
+
+@pytest.mark.asyncio
+async def test_http_connect_ok_reports_tcp_ok():
+    async def handler(reader, writer):
+        await reader.readuntil(b"\r\n\r\n")
+        writer.write(b"HTTP/1.1 200 Connection Established\r\n\r\n")
+        await writer.drain()
+        writer.close()
+
+    server, port = await _serve(handler)
+    try:
+        result = await probe_telegram_handshake(
+            {"scheme": "http", "hostname": "127.0.0.1", "port": port},
+            timeout=PROBE_HANDSHAKE_TIMEOUT_SECONDS,
+        )
+    finally:
+        server.close()
+    assert result.ok is True
+    assert result.tcp_ok is True
+
+
+@pytest.mark.asyncio
+async def test_tcp_unreachable_reports_tcp_not_ok():
+    result = await probe_telegram_handshake(
+        {"scheme": "http", "hostname": "127.0.0.1", "port": 1},
+        timeout=PROBE_HANDSHAKE_TIMEOUT_SECONDS,
+    )
+    assert result.ok is False
+    assert result.tcp_ok is False

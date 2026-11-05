@@ -37,7 +37,6 @@ from backend.core.config import get_settings
 from backend.services.telegram.accounts import mark_account_connected
 from backend.utils.account_locks import acquire_account_lock_with_timeout
 from backend.utils.names import validate_storage_name
-from backend.utils.proxy import build_proxy_dict
 from backend.utils.tg_session import (
     get_global_semaphore,
     list_account_names,
@@ -440,9 +439,12 @@ async def verify_imported_session(
     proxy: Optional[str] = None,
     api_id: Optional[int] = None,
     api_hash: Optional[str] = None,
+    proxy_id: Optional[str] = None,
+    proxy_mode: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Perform first-connect check with get_me(), update user_id, and atomically persist session."""
     from backend.services.config import get_config_service
+    from backend.services.telegram.login_proxy import resolve_login_proxy
 
     config_service = get_config_service()
 
@@ -464,24 +466,18 @@ async def verify_imported_session(
                 "CREDENTIALS_RESOLUTION_FAILED: Telegram API credentials not configured"
             ) from exc
 
-    # Fail-closed Proxy Gate
-    require_proxy = config_service.require_proxy_for_telegram()
-    if not proxy or not proxy.strip():
-        proxy = config_service.get_global_proxy()
-
-    proxy_dict = None
-    if proxy and proxy.strip():
-        proxy_dict = build_proxy_dict(proxy)
-        if not proxy_dict:
-            _cleanup_file_and_aux(temp_session_path)
-            raise ValueError(
-                "PROXY_INVALID_BLOCKED: Configured proxy string is invalid"
-            )
-    elif require_proxy:
-        _cleanup_file_and_aux(temp_session_path)
-        raise ValueError(
-            "PROXY_REQUIRED_BLOCKED: Global policy requires a proxy for Telegram connections"
+    # Fail-closed Proxy Gate: the login-time choice (inherit / direct /
+    # pool / custom) resolves here; an unknown pool id or invalid URL
+    # aborts the import instead of silently going direct.
+    try:
+        selection = resolve_login_proxy(
+            proxy=proxy, proxy_id=proxy_id, proxy_mode=proxy_mode
         )
+    except ValueError:
+        _cleanup_file_and_aux(temp_session_path)
+        raise
+    proxy = selection.proxy_url
+    proxy_dict = selection.proxy_dict
 
     if proxy_dict:
         from backend.services.telegram.accounts import get_telegram_account_service
@@ -542,8 +538,9 @@ async def verify_imported_session(
     _cleanup_file_and_aux(target_file)
     temp_session_path.replace(target_file)
 
-    # Set account profile and mark connected
-    set_account_profile(account_name, proxy=proxy)
+    # Set account profile and mark connected: persist the login-time
+    # proxy binding (pool / custom / inherit / direct), not just the URL.
+    set_account_profile(account_name, **selection.persist_kwargs())
     mark_account_connected(account_name)
 
     # Cache session string
@@ -570,6 +567,8 @@ async def import_session(
     force: bool = False,
     proxy: Optional[str] = None,
     target_dir: Optional[Path] = None,
+    proxy_id: Optional[str] = None,
+    proxy_mode: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Validate, convert, and import an external Telegram session."""
     account_name = validate_storage_name(account_name, field_name="account_name")
@@ -645,4 +644,6 @@ async def import_session(
             temp_session_path=temp_path,
             target_dir=target_dir,
             proxy=proxy,
+            proxy_id=proxy_id,
+            proxy_mode=proxy_mode,
         )

@@ -131,6 +131,8 @@ async def start_account_login(
             account_name=request.account_name,
             phone_number=request.phone_number,
             proxy=request.proxy,
+            proxy_id=request.proxy_id,
+            proxy_mode=request.proxy_mode,
         )
         rate_limiter.reset("accounts.login.start", limit_key)
 
@@ -179,6 +181,8 @@ async def verify_account_login(
             phone_code_hash=request.phone_code_hash,
             password=request.password,
             proxy=request.proxy,
+            proxy_id=request.proxy_id,
+            proxy_mode=request.proxy_mode,
         )
         rate_limiter.reset("accounts.login.verify", limit_key)
 
@@ -235,7 +239,10 @@ async def start_qr_login(
             block_seconds=900,
         )
         result = await get_telegram_service().start_qr_login(
-            account_name=request.account_name, proxy=request.proxy
+            account_name=request.account_name,
+            proxy=request.proxy,
+            proxy_id=request.proxy_id,
+            proxy_mode=request.proxy_mode,
         )
         rate_limiter.reset("accounts.qr.start", limit_key)
 
@@ -383,6 +390,8 @@ async def import_session(
     session_content: Optional[str] = None
     force = False
     proxy: Optional[str] = None
+    proxy_id: Optional[str] = None
+    proxy_mode: Optional[str] = None
     tdata_password: Optional[str] = None
     payload: bytes | str = ""
 
@@ -396,6 +405,10 @@ async def import_session(
         )
         proxy_raw = form.get("proxy")
         proxy = str(proxy_raw).strip() if proxy_raw else None
+        proxy_id_raw = form.get("proxy_id")
+        proxy_id = str(proxy_id_raw).strip() if proxy_id_raw else None
+        proxy_mode_raw = form.get("proxy_mode")
+        proxy_mode = str(proxy_mode_raw).strip() if proxy_mode_raw else None
         tdata_pwd_raw = form.get("tdata_password")
         tdata_password = str(tdata_pwd_raw).strip() if tdata_pwd_raw else None
 
@@ -415,6 +428,8 @@ async def import_session(
             session_content = req.session_content
             force = req.force
             proxy = req.proxy
+            proxy_id = req.proxy_id
+            proxy_mode = req.proxy_mode
             tdata_password = req.tdata_password.strip() if req.tdata_password else None
             if not session_content:
                 raise HTTPException(
@@ -470,6 +485,8 @@ async def import_session(
             res = await svc.import_tdata_session(
                 account_name=account_name,
                 zip_payload=zip_bytes,
+                proxy_id=proxy_id,
+                proxy_mode=proxy_mode,
                 password=tdata_password,
                 force=force,
                 proxy=proxy,
@@ -481,6 +498,8 @@ async def import_session(
                 session_type=session_type,
                 force=force,
                 proxy=proxy,
+                proxy_id=proxy_id,
+                proxy_mode=proxy_mode,
             )
         return ImportSessionResponse(
             success=True,

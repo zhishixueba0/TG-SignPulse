@@ -11,12 +11,12 @@ import secrets
 import time
 from typing import Any, Dict, Optional
 
+from backend.services.telegram.login_proxy import resolve_login_proxy
 from backend.services.telegram.sessions import (
     _cleanup_expired_login_sessions,
     _qr_login_sessions,
 )
 from backend.utils.account_locks import AccountLockLease, get_account_lock
-from backend.utils.proxy import build_proxy_dict
 from backend.utils.tg_session import (
     get_global_semaphore,
     get_session_mode,
@@ -436,7 +436,11 @@ class TelegramQrLoginMixin:
             # check_password 导致登录失败。
             await self._apply_migrate_auth(client, data)
             await self._persist_client_session(
-                client, data.get("account_name"), data.get("proxy")
+                client,
+                data.get("account_name"),
+                data.get("proxy"),
+                data.get("proxy_id"),
+                data.get("proxy_mode"),
             )
         except SessionPasswordNeeded:
             data["status"] = "password_required"
@@ -510,7 +514,11 @@ class TelegramQrLoginMixin:
 
         await self._apply_migrate_auth(client, data)
         await self._persist_client_session(
-            client, data.get("account_name"), data.get("proxy")
+            client,
+            data.get("account_name"),
+            data.get("proxy"),
+            data.get("proxy_id"),
+            data.get("proxy_mode"),
         )
 
         self._log_qr_state(login_id, "success", data)
@@ -558,7 +566,11 @@ class TelegramQrLoginMixin:
         return data.get("authorized_user")
 
     async def start_qr_login(
-        self, account_name: str, proxy: Optional[str] = None
+        self,
+        account_name: str,
+        proxy: Optional[str] = None,
+        proxy_id: Optional[str] = None,
+        proxy_mode: Optional[str] = None,
     ) -> Dict[str, Any]:
 
         account_name = self._normalize_account_name(account_name)
@@ -598,32 +610,21 @@ class TelegramQrLoginMixin:
             pass
 
         # API credentials
-        from backend.services.config import get_config_service
-
-        config_service = get_config_service()
         try:
             api_id, api_hash = self._resolve_api_credentials(strict=True)
         except ValueError:
             _release_account_lock()
             raise ValueError("Telegram API ID / API Hash 未配置或无效") from None
 
-        if not proxy:
-            global_proxy = config_service.get_global_proxy()
-            if global_proxy:
-                proxy = global_proxy
-
-        proxy_dict = build_proxy_dict(proxy) if proxy else None
-        if proxy and not proxy_dict:
-            _release_account_lock()
-            raise ValueError(
-                "PROXY_INVALID_BLOCKED: Configured proxy string is invalid"
+        try:
+            selection = resolve_login_proxy(
+                proxy=proxy, proxy_id=proxy_id, proxy_mode=proxy_mode
             )
-        if config_service.require_proxy_for_telegram() and not proxy_dict:
+        except ValueError:
             _release_account_lock()
-            raise ValueError(
-                "PROXY_REQUIRED_BLOCKED: Global policy requires a proxy for Telegram connections"
-            )
-
+            raise
+        proxy = selection.proxy_url
+        proxy_dict = selection.proxy_dict
         if proxy_dict:
             try:
                 await self.verify_account_proxy(account_name, proxy_dict)
@@ -689,6 +690,8 @@ class TelegramQrLoginMixin:
             session_data = {
                 "account_name": account_name,
                 "proxy": proxy,
+                "proxy_id": selection.proxy_id,
+                "proxy_mode": selection.mode,
                 "client": client,
                 "token": token_bytes,
                 "expires_ts": expires_ts,

@@ -50,7 +50,7 @@ export function filterAccountsByQuery<
     name: string
     remark?: string | null
     message?: string | null
-    raw?: { username?: string | null; phone?: string | null }
+    raw?: { username?: string | null; first_name?: string | null; phone?: string | null }
   },
 >(accounts: T[], searchQuery: string): T[] {
   const q = searchQuery.trim().toLowerCase()
@@ -61,6 +61,7 @@ export function filterAccountsByQuery<
       (a.remark || '').toLowerCase().includes(q) ||
       (a.message || '').toLowerCase().includes(q) ||
       (a.raw?.username || '').toLowerCase().includes(q) ||
+      (a.raw?.first_name || '').toLowerCase().includes(q) ||
       (a.raw?.phone || '').toLowerCase().includes(q),
   )
 }

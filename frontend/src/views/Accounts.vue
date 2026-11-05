@@ -20,7 +20,6 @@ import AddAccountModal from '../components/accounts/AddAccountModal.vue'
 import EditAccountModal from '../components/accounts/EditAccountModal.vue'
 import DeviceManagerModal from '../components/accounts/DeviceManagerModal.vue'
 import OfficialMessagesModal from '../components/accounts/OfficialMessagesModal.vue'
-import SessionExportModal from '../components/accounts/SessionExportModal.vue'
 import SessionPackageModal from '../components/accounts/SessionPackageModal.vue'
 import PageRetry from '../components/PageRetry.vue'
 import FilterEmptyState from '../components/FilterEmptyState.vue'
@@ -144,6 +143,10 @@ const userIdText = (acc: AccountUiItem): string => {
 const copyPlain = async (text: string) => {
   if (await copyToClipboard(text)) toast.success(t('common.copied'))
 }
+/** 卡片名称：Telegram 账户名优先（first_name → username），缺失才用面板名；
+ * 只改显示口径，acc.name 仍是账号的唯一键 */
+const displayName = (acc: AccountUiItem): string =>
+  acc.raw.first_name?.trim() || acc.raw.username?.trim() || acc.name
 /** 点一次显示明文并复制，再点隐藏；全局明文开启时只复制 */
 const toggleRevealPhone = async (acc: AccountUiItem) => {
   if (!acc.raw.phone) return
@@ -199,6 +202,8 @@ const loadAccounts = async () => {
     })
     // 限流加载头像，避免账号多时并发打满连接
     void loadAvatars(accounts.value)
+    // 身份回填（见 backfillMissingIdentity）：首屏渲染不等待
+    void backfillMissingIdentity()
   } catch (e: unknown) {
     devLog.error('Failed to fetch accounts', e)
     loadError.value = true
@@ -206,6 +211,34 @@ const loadAccounts = async () => {
   } finally {
     pageLoading.value = false
   }
+}
+
+/** 身份回填：phone / first_name / username 只在 get_me 成功后才缓存进 DB。
+ * 从未跑过状态检测/刷新资料的账号根本没有手机号可显示——卡片上没有手机号行，
+ * “显示全部手机号”开关点了自然没效果（开关逻辑本身没坏）。
+ * 首次加载后对缺失身份的账号逐个调一次 refresh-profile（已有接口，顺序、不并发），
+ * 有账号补上身份后重载一次列表；单个失败静默跳过，不弹错、不阻塞首屏。
+ * 每挂载一次最多跑一轮；开关本身只做本次会话显示，不改存储。 */
+const identityBackfilled = ref(false)
+const backfillMissingIdentity = async () => {
+  if (identityBackfilled.value) return
+  identityBackfilled.value = true
+  const token = getAuthToken()
+  if (!token) return
+  const missing = accounts.value.filter(
+    (a) => !a.raw.phone || (!a.raw.first_name && !a.raw.username),
+  )
+  if (missing.length === 0) return
+  let changed = false
+  for (const acc of missing) {
+    try {
+      await refreshAccountProfile(token, acc.name)
+      changed = true
+    } catch {
+      // 会话失效等原因拿不到身份：保持未知，不阻塞其他账号
+    }
+  }
+  if (changed) await loadAccounts()
 }
 
 const loadAvatar = async (acc: AccountUiItem) => {
@@ -416,15 +449,6 @@ const handleExportSession = (acc: AccountUiItem) => {
   closeMenu()
   packageAccountName.value = acc.name
   showPackageModal.value = true
-}
-
-/** 派生独立会话（ExportLoginToken 全新设备）：专用步骤弹窗 */
-const showDeriveModal = ref(false)
-const deriveAccountName = ref('')
-const handleDeriveSession = (acc: AccountUiItem) => {
-  closeMenu()
-  deriveAccountName.value = acc.name
-  showDeriveModal.value = true
 }
 </script>
 
@@ -670,16 +694,16 @@ const handleDeriveSession = (acc: AccountUiItem) => {
             <img
               v-if="acc.avatarUrl"
               :src="acc.avatarUrl"
-              :alt="acc.name"
+              :alt="displayName(acc)"
               class="w-full h-full object-cover"
               loading="lazy"
               decoding="async"
             >
-            <span v-else>{{ acc.name.substring(0, 2) }}</span>
+            <span v-else>{{ displayName(acc).substring(0, 2) }}</span>
           </div>
           <div class="min-w-0 flex-1">
             <div class="flex items-center gap-2 min-w-0">
-              <span class="text-sm font-medium text-[var(--sp-text)] truncate" :title="acc.name">{{ acc.name }}</span>
+              <span class="text-sm font-medium text-[var(--sp-text)] truncate" :title="acc.name">{{ displayName(acc) }}</span>
               <span
                 class="ui-badge shrink-0"
                 :class="{
@@ -746,7 +770,7 @@ const handleDeriveSession = (acc: AccountUiItem) => {
                 <MoreHorizontal class="w-3.5 h-3.5" />
               </button>
               <div v-if="openMenuName === acc.name" class="fixed inset-0 z-40" aria-hidden="true" @click="closeMenu" />
-              <div v-if="openMenuName === acc.name" class="absolute right-0 top-full mt-1 z-50 min-w-44 ui-card p-1 shadow-[var(--sp-shadow-md)]" role="menu">
+              <div v-if="openMenuName === acc.name" class="absolute right-0 top-full mt-1 z-50 min-w-44 max-h-[70vh] overflow-y-auto ui-card p-1 shadow-[var(--sp-shadow-md)]" role="menu">
                 <button type="button" role="menuitem" class="ui-menu-item" @click="handleRelogin(acc.name)">{{ t('accounts.relogin') }}</button>
                 <button type="button" role="menuitem" class="ui-menu-item" @click="handleRefreshProfile(acc)">{{ t('accounts.refreshProfile') }}</button>
                 <button type="button" role="menuitem" class="ui-menu-item" @click="openTagsModal(acc, 'edit')">{{ t('accounts.editTags') }}</button>
@@ -755,7 +779,6 @@ const handleDeriveSession = (acc: AccountUiItem) => {
                 <button type="button" role="menuitem" class="ui-menu-item" @click="handlePauseToggle(acc)">{{ acc.raw.paused ? t('accounts.resumeAccount') : t('accounts.pauseAccount') }}</button>
                 <button type="button" role="menuitem" class="ui-menu-item" @click="openEdit(acc)">{{ t('accounts.nameRemarkProxy') }}</button>
                 <button type="button" role="menuitem" class="ui-menu-item" @click="handleExportSession(acc)">{{ t('accounts.exportSessionPackage') }}</button>
-                <button type="button" role="menuitem" class="ui-menu-item" @click="handleDeriveSession(acc)">{{ t('accounts.deriveStandaloneSession') }}</button>
                 <button type="button" role="menuitem" class="ui-menu-item" @click="goLogs(acc.name)">{{ t('accounts.runLogs') }}</button>
                 <button type="button" role="menuitem" class="ui-menu-item" @click="openDevices(acc.name)">{{ t('accounts.devicesAndSessions') }}</button>
                 <button type="button" role="menuitem" class="ui-menu-item" @click="openOfficialMessages(acc.name)">{{ t('accounts.officialMessages') }}</button>
@@ -776,15 +799,15 @@ const handleDeriveSession = (acc: AccountUiItem) => {
             <img 
               v-if="acc.avatarUrl" 
               :src="acc.avatarUrl" 
-              :alt="acc.name"
+              :alt="displayName(acc)"
               class="w-full h-full object-cover"
               loading="lazy"
               decoding="async"
             />
-            <span v-else>{{ acc.name.substring(0, 2) }}</span>
+            <span v-else>{{ displayName(acc).substring(0, 2) }}</span>
           </div>
           <div class="truncate">
-            <div class="text-sm font-medium text-[var(--sp-text)] truncate" :title="acc.name">{{ acc.name }}</div>
+            <div class="text-sm font-medium text-[var(--sp-text)] truncate" :title="acc.name">{{ displayName(acc) }}</div>
             <div class="text-xs text-[var(--sp-text-muted)] mt-0.5 font-mono truncate" :title="acc.remark || t('accounts.noRemark')">{{ acc.remark || t('accounts.noRemark') }}</div>
           </div>
         </div>
@@ -814,7 +837,7 @@ const handleDeriveSession = (acc: AccountUiItem) => {
               <MoreHorizontal class="w-3.5 h-3.5" />
             </button>
             <div v-if="openMenuName === acc.name" class="fixed inset-0 z-40" aria-hidden="true" @click="closeMenu" />
-            <div v-if="openMenuName === acc.name" class="absolute right-0 top-full mt-1 z-50 min-w-44 ui-card p-1 shadow-[var(--sp-shadow-md)]" role="menu">
+            <div v-if="openMenuName === acc.name" class="absolute right-0 top-full mt-1 z-50 min-w-44 max-h-[70vh] overflow-y-auto ui-card p-1 shadow-[var(--sp-shadow-md)]" role="menu">
               <button type="button" role="menuitem" class="ui-menu-item" @click="handleRelogin(acc.name)">{{ t('accounts.relogin') }}</button>
               <button type="button" role="menuitem" class="ui-menu-item" @click="handleRefreshProfile(acc)">{{ t('accounts.refreshProfile') }}</button>
               <button type="button" role="menuitem" class="ui-menu-item" @click="openTagsModal(acc, 'edit')">{{ t('accounts.editTags') }}</button>
@@ -823,7 +846,6 @@ const handleDeriveSession = (acc: AccountUiItem) => {
               <button type="button" role="menuitem" class="ui-menu-item" @click="handlePauseToggle(acc)">{{ acc.raw.paused ? t('accounts.resumeAccount') : t('accounts.pauseAccount') }}</button>
               <button type="button" role="menuitem" class="ui-menu-item" @click="openEdit(acc)">{{ t('accounts.nameRemarkProxy') }}</button>
               <button type="button" role="menuitem" class="ui-menu-item" @click="handleExportSession(acc)">{{ t('accounts.exportSessionPackage') }}</button>
-              <button type="button" role="menuitem" class="ui-menu-item" @click="handleDeriveSession(acc)">{{ t('accounts.deriveStandaloneSession') }}</button>
               <button type="button" role="menuitem" class="ui-menu-item" @click="goLogs(acc.name)">{{ t('accounts.runLogs') }}</button>
               <button type="button" role="menuitem" class="ui-menu-item" @click="openDevices(acc.name)">{{ t('accounts.devicesAndSessions') }}</button>
               <button type="button" role="menuitem" class="ui-menu-item" @click="openOfficialMessages(acc.name)">{{ t('accounts.officialMessages') }}</button>
@@ -837,11 +859,8 @@ const handleDeriveSession = (acc: AccountUiItem) => {
       <div class="space-y-1 mb-4 text-xs">
         <div class="flex gap-1.5">
           <span class="text-[var(--sp-text-muted)] shrink-0">{{ t('accounts.idNumber') }}：</span>
-          <span class="text-[var(--sp-text-secondary)] font-mono truncate" :title="acc.name">{{ acc.name }}</span>
-        </div>
-        <div v-if="acc.raw.phone" class="flex gap-1.5">
-          <span class="text-[var(--sp-text-muted)] shrink-0">{{ t('accounts.phone') }}：</span>
-          <span class="text-[var(--sp-text-secondary)] font-mono truncate cursor-pointer" :title="t('accounts.clickToReveal')" @click="toggleRevealPhone(acc)">{{ phoneText(acc) }}</span>
+          <span v-if="acc.raw.phone" class="text-[var(--sp-text-secondary)] font-mono truncate cursor-pointer" :title="t('accounts.clickToReveal')" @click="toggleRevealPhone(acc)">{{ phoneText(acc) }}</span>
+          <span v-else class="text-[var(--sp-text-secondary)] truncate">{{ t('accounts.phoneUnknown') }}</span>
         </div>
         <div v-if="acc.raw.user_id !== null && acc.raw.user_id !== undefined" class="flex gap-1.5">
           <span class="text-[var(--sp-text-muted)] shrink-0">{{ t('accounts.userId') }}：</span>
@@ -950,7 +969,6 @@ const handleDeriveSession = (acc: AccountUiItem) => {
     <EditAccountModal v-if="editingAccount" :isOpen="showEditModal" :account="editingAccount" @close="showEditModal = false" @closed="onEditModalClosed" @success="loadAccounts" @relogin="handleRelogin" />
     <DeviceManagerModal :isOpen="showDeviceModal" :accountName="deviceAccountName" @close="showDeviceModal = false" />
     <SessionPackageModal :isOpen="showPackageModal" :accountName="packageAccountName" @close="showPackageModal = false" />
-    <SessionExportModal :isOpen="showDeriveModal" :accountName="deriveAccountName" @close="showDeriveModal = false" />
     <OfficialMessagesModal :isOpen="showOfficialMessagesModal" :accountName="officialMessagesAccountName" @close="showOfficialMessagesModal = false" />
   </div>
 </template>

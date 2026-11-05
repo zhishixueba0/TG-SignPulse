@@ -306,6 +306,7 @@ async def test_proxy(
         "cached": outcome.cached,
         "code": outcome.code,
         "detail": outcome.detail,
+        "tcp_ok": outcome.tcp_ok,
         "last_test_ok": ok,
     }
 
@@ -522,4 +523,5 @@ async def test_global_proxy(current_user: User = Depends(get_current_user)):
         "cached": outcome.cached,
         "code": outcome.code,
         "detail": outcome.detail,
+        "tcp_ok": outcome.tcp_ok,
     }

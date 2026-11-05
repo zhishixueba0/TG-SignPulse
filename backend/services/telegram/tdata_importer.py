@@ -266,6 +266,8 @@ async def import_tdata_session(
     force: bool = False,
     proxy: Optional[str] = None,
     target_dir: Optional[Path] = None,
+    proxy_id: Optional[str] = None,
+    proxy_mode: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Safely unpack TData zip, convert to session, and delegate to Task 9 import_session.
 
@@ -306,6 +308,8 @@ async def import_tdata_session(
             force=force,
             proxy=proxy,
             target_dir=target_dir,
+            proxy_id=proxy_id,
+            proxy_mode=proxy_mode,
         )
     finally:
         with contextlib.suppress(Exception):

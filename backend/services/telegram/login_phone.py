@@ -11,12 +11,12 @@ from typing import Any, Dict, Optional
 
 from backend.core.config import get_settings
 from backend.services.telegram.accounts import mark_account_connected
+from backend.services.telegram.login_proxy import resolve_login_proxy
 from backend.services.telegram.sessions import (
     _cleanup_expired_login_sessions,
     _login_sessions,
 )
 from backend.utils.account_locks import AccountLockLease, get_account_lock
-from backend.utils.proxy import build_proxy_dict
 from backend.utils.tg_session import (
     get_global_semaphore,
     get_session_mode,
@@ -67,7 +67,12 @@ class TelegramPhoneLoginMixin:
         return expires_ts
 
     async def start_login(
-        self, account_name: str, phone_number: str, proxy: Optional[str] = None
+        self,
+        account_name: str,
+        phone_number: str,
+        proxy: Optional[str] = None,
+        proxy_id: Optional[str] = None,
+        proxy_mode: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         开始登录流程（发送验证码）
@@ -165,23 +170,15 @@ class TelegramPhoneLoginMixin:
             _release_account_lock()
             raise ValueError("Telegram API ID / API Hash 未配置或无效") from None
 
-        if not proxy:
-            global_proxy = config_service.get_global_proxy()
-            if global_proxy:
-                proxy = global_proxy
-
-        proxy_dict = build_proxy_dict(proxy) if proxy else None
-        if proxy and not proxy_dict:
-            _release_account_lock()
-            raise ValueError(
-                "PROXY_INVALID_BLOCKED: Configured proxy string is invalid"
+        try:
+            selection = resolve_login_proxy(
+                proxy=proxy, proxy_id=proxy_id, proxy_mode=proxy_mode
             )
-        if config_service.require_proxy_for_telegram() and not proxy_dict:
+        except ValueError:
             _release_account_lock()
-            raise ValueError(
-                "PROXY_REQUIRED_BLOCKED: Global policy requires a proxy for Telegram connections"
-            )
-
+            raise
+        proxy = selection.proxy_url
+        proxy_dict = selection.proxy_dict
         if proxy_dict:
             try:
                 await self.verify_account_proxy(account_name, proxy_dict)
@@ -284,6 +281,8 @@ class TelegramPhoneLoginMixin:
         phone_code_hash: str,
         password: Optional[str] = None,
         proxy: Optional[str] = None,
+        proxy_id: Optional[str] = None,
+        proxy_mode: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         验证登录（输入验证码和可选的2FA密码）
@@ -369,7 +368,9 @@ class TelegramPhoneLoginMixin:
                     # 登录成功，获取用户信息
                     # get_me 走超时保护：网络挂起时登录接口不能无限等待
                     me = await asyncio.wait_for(client.get_me(), timeout=10)
-                    await self._persist_client_session(client, account_name, proxy)
+                    await self._persist_client_session(
+                        client, account_name, proxy, proxy_id, proxy_mode
+                    )
 
                     # 断开连接并清理（成功路径同样容忍断连抖动，避免已登录被误报失败）
                     await _discard_login_client(
@@ -393,7 +394,9 @@ class TelegramPhoneLoginMixin:
                     try:
                         await client.check_password(password)
                         me = await asyncio.wait_for(client.get_me(), timeout=10)
-                        await self._persist_client_session(client, account_name, proxy)
+                        await self._persist_client_session(
+                            client, account_name, proxy, proxy_id, proxy_mode
+                        )
 
                         # 断开连接并清理
                         await _discard_login_client(
@@ -435,7 +438,12 @@ class TelegramPhoneLoginMixin:
                 raise ValueError(f"登录失败: {error_msg}")
 
     async def _persist_client_session(
-        self, client, account_name: str, proxy: Optional[str] = None
+        self,
+        client,
+        account_name: str,
+        proxy: Optional[str] = None,
+        proxy_id: Optional[str] = None,
+        proxy_mode: Optional[str] = None,
     ) -> None:
         session_mode = get_session_mode()
         if session_mode == "string":
@@ -460,15 +468,17 @@ class TelegramPhoneLoginMixin:
                     mark_account_connected(account_name)
                 except Exception:
                     pass
-        if not proxy:
-            from backend.services.config import get_config_service
-
-            global_proxy = get_config_service().get_global_proxy()
-            if global_proxy:
-                proxy = global_proxy
-        if proxy:
+        # 登录时选定的代理绑定：pool/custom/inherit/direct 按登录选择持久化，
+        # 让账号此后一直走同一条线路；解析失败时保持旧绑定、不静默改写。
+        try:
+            selection = resolve_login_proxy(
+                proxy=proxy, proxy_id=proxy_id, proxy_mode=proxy_mode
+            )
+        except ValueError:
+            selection = None
+        if selection is not None:
             from backend.utils.tg_session import set_account_profile
 
-            set_account_profile(account_name, proxy=proxy)
+            set_account_profile(account_name, **selection.persist_kwargs())
         mark_account_connected(account_name)
         self._accounts_cache = None

@@ -19,6 +19,7 @@ from backend.core.rate_limit import compose_rate_limit_key, get_rate_limiter
 from backend.core.security import verify_password
 from backend.models.user import User
 from backend.services.telegram.session_package import build_session_zip
+from backend.services.telegram.tdata_exporter import build_tdata_zip
 from backend.utils.names import validate_storage_name
 
 logger = logging.getLogger(__name__)
@@ -29,6 +30,7 @@ rate_limiter = get_rate_limiter()
 
 class ExportSessionRequest(BaseModel):
     password: str
+    format: str = "session"  # session | tdata
 
 
 def _apply_export_rate_limit(request: Request, account_name: str) -> None:
@@ -56,7 +58,15 @@ async def export_session(
 
     面板密码二次确认 + 限流；成功后经后台任务发 Bot 提醒。
     响应为 application/zip，Cache-Control: no-store。
+    ``format=session``：{base}.session + {base}.json 的 ZIP（Session 格式）；
+    ``format=tdata``：顶层 tdata/ 目录的 ZIP（Telegram Desktop 直接用）。
     """
+    export_format = (request.format or "session").strip().lower()
+    if export_format not in ("session", "tdata"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="EXPORT_FORMAT_INVALID"
+        )
+
     try:
         account_name = validate_storage_name(account_name, field_name="account_name")
     except ValueError as e:
@@ -73,9 +83,14 @@ async def export_session(
         )
 
     try:
-        zip_bytes, filename = build_session_zip(
-            account_name, exported_by=current_user.username
-        )
+        if export_format == "tdata":
+            zip_bytes, filename = await build_tdata_zip(
+                account_name, exported_by=current_user.username
+            )
+        else:
+            zip_bytes, filename = build_session_zip(
+                account_name, exported_by=current_user.username
+            )
     except ValueError as exc:
         message = str(exc)
         if message.startswith("ACCOUNT_NOT_FOUND"):
@@ -83,6 +98,12 @@ async def export_session(
                 status_code=status.HTTP_404_NOT_FOUND, detail="ACCOUNT_NOT_FOUND"
             ) from exc
         if message.startswith("CREDENTIALS_RESOLUTION_FAILED"):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail=message
+            ) from exc
+        if message.startswith("TDATA_CONVERTER_UNAVAILABLE") or message.startswith(
+            "TDATA_CONVERSION_FAILED"
+        ):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST, detail=message
             ) from exc

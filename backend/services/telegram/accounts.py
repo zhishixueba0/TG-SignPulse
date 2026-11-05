@@ -1108,6 +1108,8 @@ class TelegramAccountsMixin:
         session_type: str = "auto",
         force: bool = False,
         proxy: Optional[str] = None,
+        proxy_id: Optional[str] = None,
+        proxy_mode: Optional[str] = None,
     ) -> Dict[str, Any]:
         """导入外部 Telegram 会话（Telethon SQLite, Pyrogram SQLite, Pyrogram StringSession）"""
         from backend.services.telegram.session_importer import (
@@ -1121,6 +1123,8 @@ class TelegramAccountsMixin:
             force=force,
             proxy=proxy,
             target_dir=self.session_dir,
+            proxy_id=proxy_id,
+            proxy_mode=proxy_mode,
         )
         self._accounts_cache = None
         return res
@@ -1133,6 +1137,8 @@ class TelegramAccountsMixin:
         password: Optional[str] = None,
         force: bool = False,
         proxy: Optional[str] = None,
+        proxy_id: Optional[str] = None,
+        proxy_mode: Optional[str] = None,
     ) -> Dict[str, Any]:
         """导入 Telegram Desktop (TData) 归档包。"""
         from backend.services.telegram.tdata_importer import (
@@ -1146,6 +1152,8 @@ class TelegramAccountsMixin:
             force=force,
             proxy=proxy,
             target_dir=self.session_dir,
+            proxy_id=proxy_id,
+            proxy_mode=proxy_mode,
         )
         self._accounts_cache = None
         return res

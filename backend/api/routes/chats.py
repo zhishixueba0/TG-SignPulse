@@ -1,4 +1,4 @@
-"""聊天中心 API 路由（Batch 6）：对话列表 / 消息收发，仅文本。"""
+"""聊天中心 API 路由（Batch 6）：对话列表 / 消息收发；图片与内联按钮（Round 4）。"""
 
 from __future__ import annotations
 
@@ -6,6 +6,7 @@ import logging
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi.responses import Response
 from pydantic import BaseModel
 
 from backend.core.auth import get_current_user
@@ -35,8 +36,18 @@ class ChatDialogsResponse(BaseModel):
     total: int
 
 
+class ChatButtonItem(BaseModel):
+    """内联键盘按钮：url 由前端打开，callback 调 Telegram 回调。"""
+
+    row: int
+    col: int
+    text: str
+    kind: str  # url | callback
+    url: Optional[str] = None
+
+
 class ChatMessageItem(BaseModel):
-    """单条消息（文本）"""
+    """单条消息（文本 + 图片 + 内联键盘）"""
 
     id: Optional[int] = None
     date: Optional[str] = None
@@ -44,6 +55,8 @@ class ChatMessageItem(BaseModel):
     outgoing: bool = False
     sender_name: str = ""
     sender_id: Optional[int] = None
+    media_type: Optional[str] = None  # 目前只有 "photo"
+    buttons: list[ChatButtonItem] = []
 
 
 class ChatMessagesResponse(BaseModel):
@@ -56,6 +69,22 @@ class SendChatMessageRequest(BaseModel):
 
     chat_id: int | str
     text: str
+
+
+class PressChatButtonRequest(BaseModel):
+    """点内联键盘按钮：只点用户点的这一个按钮。"""
+
+    chat_id: int | str
+    message_id: int
+    row: int
+    col: int
+
+
+class PressChatButtonResponse(BaseModel):
+    action: str  # url | callback
+    message: str = ""
+    alert: bool = False
+    url: Optional[str] = None
 
 
 class SendChatMessageResponse(BaseModel):
@@ -121,6 +150,57 @@ async def list_messages(
             messages=[ChatMessageItem(**item) for item in messages],
             total=len(messages),
         )
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise _handle_service_error(account_name, e)
+
+
+@router.get(
+    "/{account_name}/media/{message_id}",
+    response_class=Response,
+)
+async def download_chat_media(
+    account_name: str,
+    message_id: int,
+    chat_id: str = Query(..., description="对话 id（数字或用户名）"),
+    thumb: bool = Query(True, description="thumb=1 缩略图，thumb=0 原图"),
+    current_user: User = Depends(get_current_user),
+):
+    """下载一条图片消息（JPEG）。"""
+    try:
+        account_name = validate_storage_name(account_name, field_name="account_name")
+        data = await get_telegram_service().download_chat_media(
+            account_name, chat_id, message_id, thumb=thumb
+        )
+        return Response(
+            content=data,
+            media_type="image/jpeg",
+            headers={"Cache-Control": "no-store"},
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise _handle_service_error(account_name, e)
+
+
+@router.post("/{account_name}/button", response_model=PressChatButtonResponse)
+async def press_chat_button(
+    account_name: str,
+    request: PressChatButtonRequest,
+    current_user: User = Depends(get_current_user),
+):
+    """点一条消息的内联键盘按钮。链接按钮返回 url；回调按钮调 Telegram 回调。"""
+    try:
+        account_name = validate_storage_name(account_name, field_name="account_name")
+        result = await get_telegram_service().press_chat_button(
+            account_name,
+            request.chat_id,
+            request.message_id,
+            request.row,
+            request.col,
+        )
+        return PressChatButtonResponse(**result)
     except HTTPException:
         raise
     except Exception as e:

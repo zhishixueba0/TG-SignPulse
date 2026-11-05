@@ -75,8 +75,44 @@ describe('SessionPackageModal', () => {
     downloadBtn!.click()
     await flushPromises()
 
-    expect(exportSpy).toHaveBeenCalledWith('mock-token', 'test-account', 'panel-pw')
+    expect(exportSpy).toHaveBeenCalledWith('mock-token', 'test-account', 'panel-pw', 'session')
     expect(mockToastSuccess).toHaveBeenCalledWith('accounts.sessionPackageDownloaded')
+    expect(wrapper.emitted('close')).toBeTruthy()
+
+    wrapper.unmount()
+  })
+
+  it('选 TData 格式时调导出并传 tdata', async () => {
+    const exportSpy = vi.spyOn(api, 'exportSessionPackage').mockResolvedValue({ filename: 'a-tdata.zip' })
+
+    const wrapper = mount(SessionPackageModal, {
+      props: { isOpen: true, accountName: 'test-account' },
+      attachTo: document.body,
+    })
+    await flushPromises()
+
+    const tdataRadio = document.body.querySelector(
+      'input[type="radio"][value="tdata"]',
+    ) as HTMLInputElement
+    expect(tdataRadio).toBeTruthy()
+    tdataRadio.click()
+    await flushPromises()
+
+    const input = document.body.querySelector(
+      '#session-package-password',
+    ) as HTMLInputElement
+    input.value = 'panel-pw'
+    input.dispatchEvent(new Event('input'))
+    await flushPromises()
+
+    const buttons = Array.from(document.body.querySelectorAll('button'))
+    const downloadBtn = buttons.find((b) =>
+      (b.textContent || '').includes('accounts.sessionPackageDownload'),
+    )
+    downloadBtn!.click()
+    await flushPromises()
+
+    expect(exportSpy).toHaveBeenCalledWith('mock-token', 'test-account', 'panel-pw', 'tdata')
     expect(wrapper.emitted('close')).toBeTruthy()
 
     wrapper.unmount()

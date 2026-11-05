@@ -336,7 +336,13 @@
     "runLogs": "运行日志",
     "tagsPlaceholder": "标签之间用空格分隔",
     "pauseAccountFailed": "暂停账号失败",
-    "resumeAccountFailed": "恢复账号失败"
+    "resumeAccountFailed": "恢复账号失败",
+    "phoneUnknown": "未知",
+    "sessionPackageFormatLabel": "导出格式",
+    "sessionPackageFormatSession": "Session 格式（.session + .json）",
+    "sessionPackageFormatTdata": "TData 格式（Telegram Desktop）",
+    "sessionPackageFormatSessionHint": "解压后得到 .session 与 .json，可导入本面板或其他支持 Session 的客户端。",
+    "sessionPackageFormatTdataHint": "解压后得到 tdata 文件夹，放到电脑上 Telegram Desktop 的数据目录即可直接使用。"
   },
   "proxies": {
     "title": "代理管理",
@@ -450,7 +456,8 @@
     "latencyMs": "{ms} ms",
     "lastTestedAt": "上次检测 {time}",
     "hasPassword": "有密码",
-    "hasSecret": "有 Secret"
+    "hasSecret": "有 Secret",
+    "tcpPortOpen": "TCP 端口通"
   },
   "tasks": {
     "empty": "还没有任务",
@@ -1592,7 +1599,13 @@
     "passkeyHideKey": "隐藏私钥",
     "passkeyUnavailable": "服务器未安装 Telethon，通行密钥登录不可用",
     "passkeySharedApiWarning": "当前使用面板默认的共享 API，建议先在设置 > Telegram 里换成自己的 API 再登录",
-    "passkeyFailed": "通行密钥登录失败"
+    "passkeyFailed": "通行密钥登录失败",
+    "proxyModeInherit": "继承全局代理",
+    "proxyModeDirect": "直连",
+    "proxyModePool": "指定代理",
+    "proxyModeCustom": "自定义线路",
+    "proxySelectPlaceholder": "选择代理库中的代理",
+    "proxyLoadFailed": "代理库加载失败，请用自定义线路填写代理地址"
   },
   "editAccount": {
     "title": "编辑账号",
@@ -1772,6 +1785,10 @@
     "typeBot": "机器人",
     "typeGroup": "群组",
     "typeSupergroup": "超级群组",
-    "typeChannel": "频道"
+    "typeChannel": "频道",
+    "photoMessage": "图片消息",
+    "viewFullImage": "查看原图",
+    "imageLoadFailed": "图片加载失败",
+    "pressButtonFailed": "点击按钮失败"
   }
 }

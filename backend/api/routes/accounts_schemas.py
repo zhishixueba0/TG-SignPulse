@@ -15,6 +15,8 @@ class LoginStartRequest(BaseModel):
     account_name: str
     phone_number: str
     proxy: Optional[str] = None
+    proxy_id: Optional[str] = None
+    proxy_mode: Optional[str] = None
 
 
 class LoginStartResponse(BaseModel):
@@ -35,6 +37,8 @@ class LoginVerifyRequest(BaseModel):
     phone_code_hash: str
     password: Optional[str] = None  # 2FA 密码
     proxy: Optional[str] = None
+    proxy_id: Optional[str] = None
+    proxy_mode: Optional[str] = None
 
 
 class LoginVerifyResponse(BaseModel):
@@ -52,6 +56,8 @@ class QrLoginStartRequest(BaseModel):
 
     account_name: str
     proxy: Optional[str] = None
+    proxy_id: Optional[str] = None
+    proxy_mode: Optional[str] = None
 
 
 class QrLoginStartResponse(BaseModel):
@@ -365,6 +371,8 @@ class ImportSessionRequest(BaseModel):
     session_content: Optional[str] = None  # base64 或 raw string
     force: bool = False
     proxy: Optional[str] = None
+    proxy_id: Optional[str] = None
+    proxy_mode: Optional[str] = None
     tdata_password: Optional[str] = None
 
 

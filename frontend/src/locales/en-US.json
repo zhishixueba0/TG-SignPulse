@@ -336,7 +336,13 @@
     "runLogs": "Run logs",
     "tagsPlaceholder": "Separate tags with spaces",
     "pauseAccountFailed": "Failed to pause account",
-    "resumeAccountFailed": "Failed to resume account"
+    "resumeAccountFailed": "Failed to resume account",
+    "phoneUnknown": "Unknown",
+    "sessionPackageFormatLabel": "Export format",
+    "sessionPackageFormatSession": "Session format (.session + .json)",
+    "sessionPackageFormatTdata": "TData format (Telegram Desktop)",
+    "sessionPackageFormatSessionHint": "Unzips to a .session file and a .json file, importable into this panel or other Session clients.",
+    "sessionPackageFormatTdataHint": "Unzips to a tdata folder; drop it into Telegram Desktop's data directory on your computer to use it directly."
   },
   "proxies": {
     "title": "Proxies",
@@ -450,7 +456,8 @@
     "latencyMs": "{ms} ms",
     "lastTestedAt": "Last tested {time}",
     "hasPassword": "Password set",
-    "hasSecret": "Secret set"
+    "hasSecret": "Secret set",
+    "tcpPortOpen": "TCP port reachable"
   },
   "tasks": {
     "empty": "No tasks yet",
@@ -1592,7 +1599,13 @@
     "passkeyHideKey": "Hide private key",
     "passkeyUnavailable": "Telethon is not installed on the server, passkey login is unavailable",
     "passkeySharedApiWarning": "The panel's shared default API is in use; set your own API in Settings > Telegram first",
-    "passkeyFailed": "Passkey login failed"
+    "passkeyFailed": "Passkey login failed",
+    "proxyModeInherit": "Inherit global proxy",
+    "proxyModeDirect": "Direct",
+    "proxyModePool": "Specific proxy",
+    "proxyModeCustom": "Custom URL",
+    "proxySelectPlaceholder": "Choose a proxy from the library",
+    "proxyLoadFailed": "Proxy library failed to load, enter a proxy URL instead"
   },
   "editAccount": {
     "title": "Edit Account",
@@ -1772,6 +1785,10 @@
     "typeBot": "Bot",
     "typeGroup": "Group",
     "typeSupergroup": "Supergroup",
-    "typeChannel": "Channel"
+    "typeChannel": "Channel",
+    "photoMessage": "Photo message",
+    "viewFullImage": "View full image",
+    "imageLoadFailed": "Failed to load image",
+    "pressButtonFailed": "Failed to press button"
   }
 }

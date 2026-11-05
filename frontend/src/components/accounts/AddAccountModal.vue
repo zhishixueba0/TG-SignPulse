@@ -17,6 +17,8 @@ import {
   submitPasskeyPassword,
 } from '../../lib/api'
 import { getAuthToken } from '../../lib/api/core'
+import { listProxies, type ProxyItem } from '../../lib/api/proxies'
+import { loginProxyPayload, poolProxyOptionLabel, type LoginProxyMode } from '../../lib/login-proxy'
 import { useI18n } from '../../composables/useI18n'
 import { useToast } from '../../composables/useToast'
 import { startChainPoll, type ChainPollHandle } from '../../lib/chain-poll'
@@ -89,6 +91,26 @@ const startCodeCountdown = () => {
     codeCountdown.value -= 1
     if (codeCountdown.value <= 0) stopCodeCountdown()
   }, 1000)
+}
+
+// 登录代理选择：与编辑账号弹窗一致（继承全局 / 直连 / 指定池代理 / 自定义 URL）
+const proxyMode = ref<LoginProxyMode>('inherit')
+const proxyId = ref('')
+const poolProxies = ref<ProxyItem[]>([])
+const poolFailed = ref(false)
+
+const loadPool = async () => {
+  const token = getAuthToken()
+  if (!token) return
+  try {
+    poolFailed.value = false
+    const res = await listProxies(token)
+    poolProxies.value = res.proxies
+  } catch {
+    // 代理池加载失败：退回自由文本输入，不阻塞登录
+    poolFailed.value = true
+    poolProxies.value = []
+  }
 }
 
 // Code login specific
@@ -169,12 +191,15 @@ const reset = async () => {
   forceOverwrite.value = false
   importSubtype.value = 'file'
   loading.value = false
+  proxyMode.value = 'inherit'
+  proxyId.value = ''
 }
 
 watch(() => props.isOpen, (val) => {
   if (val) {
     if (props.initialMethod) loginMethod.value = props.initialMethod
     reset()
+    void loadPool()
     if (loginMethod.value === 'passkey') void checkPasskeyStatus()
   } else {
     reset()
@@ -188,12 +213,16 @@ watch(loginMethod, () => {
   const remark = form.value.remark
   const password = form.value.password
   const proxy = form.value.proxy
+  const proxyModeSaved = proxyMode.value
+  const proxyIdSaved = proxyId.value
   const tdataPassword = form.value.tdata_password
   reset()
   form.value.account_name = accountName
   form.value.remark = remark
   form.value.password = password
   form.value.proxy = proxy
+  proxyMode.value = proxyModeSaved
+  proxyId.value = proxyIdSaved
   form.value.tdata_password = tdataPassword
   if (loginMethod.value === 'passkey') void checkPasskeyStatus()
 })
@@ -290,7 +319,7 @@ const handleGetQr = async () => {
   try {
     const res = await startQrLogin(token, {
       account_name: form.value.account_name,
-      proxy: form.value.proxy || undefined
+      ...loginProxyPayload(proxyMode.value, proxyId.value, form.value.proxy),
     })
     loginId.value = res.login_id
     qrImage.value = res.qr_image || ''
@@ -321,7 +350,7 @@ const handleSendCode = async () => {
     const res = await startAccountLogin(token, {
       account_name: form.value.account_name,
       phone_number: form.value.phone_number,
-      proxy: form.value.proxy || undefined
+      ...loginProxyPayload(proxyMode.value, proxyId.value, form.value.proxy),
     })
     phoneCodeHash.value = res.phone_code_hash
     codeSent.value = true
@@ -367,13 +396,16 @@ const handleSave = async () => {
           error.value = t('addAccount.fileRequired')
           return
         }
+        const loginProxy = loginProxyPayload(proxyMode.value, proxyId.value, form.value.proxy)
         await importAccountSessionFile(
           token,
           form.value.account_name,
           selectedFile.value,
           forceOverwrite.value,
-          form.value.proxy || undefined,
+          loginProxy.proxy,
           form.value.tdata_password || undefined,
+          loginProxy.proxy_id,
+          loginProxy.proxy_mode,
         )
       } else {
         if (!form.value.session_content.trim()) {
@@ -385,7 +417,7 @@ const handleSave = async () => {
           session_type: 'string',
           session_content: form.value.session_content.trim(),
           force: forceOverwrite.value,
-          proxy: form.value.proxy || undefined,
+          ...loginProxyPayload(proxyMode.value, proxyId.value, form.value.proxy),
           tdata_password: form.value.tdata_password || undefined,
         })
       }
@@ -446,7 +478,7 @@ const handleSave = async () => {
         user_handle: form.value.user_handle.trim(),
         account_name: form.value.account_name || undefined,
         remark: form.value.remark || undefined,
-        proxy: form.value.proxy || undefined,
+        ...loginProxyPayload(proxyMode.value, proxyId.value, form.value.proxy),
       })
       if (res.need_password && res.passkey_id) {
         passkeyId.value = res.passkey_id
@@ -481,7 +513,7 @@ const handleSave = async () => {
         phone_code: form.value.phone_code,
         phone_code_hash: phoneCodeHash.value,
         password: form.value.password || undefined,
-        proxy: form.value.proxy || undefined
+        ...loginProxyPayload(proxyMode.value, proxyId.value, form.value.proxy),
       })
       await saveRemarkIfPresent(token)
       toast.success(t('addAccount.loginSuccess'))
@@ -802,13 +834,44 @@ onUnmounted(() => {
         >
       </div>
 
-      <!-- Proxy for ALL -->
+      <!-- Proxy for ALL：与编辑账号一致（继承全局 / 直连 / 指定池代理 / 自定义 URL） -->
       <div class="space-y-1.5">
-        <label class="ui-label" for="add-account-proxy">{{ t('addAccount.proxy') }}</label>
-        <input 
+        <span class="ui-label">{{ t('addAccount.proxy') }}</span>
+        <div class="flex flex-wrap gap-x-4 gap-y-1.5">
+          <label class="flex items-center gap-1.5 text-xs text-[var(--sp-text-secondary)] cursor-pointer">
+            <input v-model="proxyMode" type="radio" value="inherit" class="!w-auto">
+            {{ t('addAccount.proxyModeInherit') }}
+          </label>
+          <label class="flex items-center gap-1.5 text-xs text-[var(--sp-text-secondary)] cursor-pointer">
+            <input v-model="proxyMode" type="radio" value="direct" class="!w-auto">
+            {{ t('addAccount.proxyModeDirect') }}
+          </label>
+          <label class="flex items-center gap-1.5 text-xs text-[var(--sp-text-secondary)] cursor-pointer">
+            <input v-model="proxyMode" type="radio" value="pool" class="!w-auto" :disabled="poolProxies.length === 0">
+            {{ t('addAccount.proxyModePool') }}
+          </label>
+          <label class="flex items-center gap-1.5 text-xs text-[var(--sp-text-secondary)] cursor-pointer">
+            <input v-model="proxyMode" type="radio" value="custom" class="!w-auto">
+            {{ t('addAccount.proxyModeCustom') }}
+          </label>
+        </div>
+        <p v-if="poolFailed" class="text-xs text-[var(--sp-text-muted)]">{{ t('addAccount.proxyLoadFailed') }}</p>
+        <select
+          v-if="proxyMode === 'pool'"
+          v-model="proxyId"
+          class="ui-input"
+          :aria-label="t('addAccount.proxyModePool')"
+        >
+          <option value="" disabled>{{ t('addAccount.proxySelectPlaceholder') }}</option>
+          <option v-for="p in poolProxies" :key="p.id" :value="p.id">
+            {{ poolProxyOptionLabel(p) }}
+          </option>
+        </select>
+        <input
+          v-if="proxyMode === 'custom'"
           id="add-account-proxy"
           v-model="form.proxy"
-          type="text" 
+          type="text"
           :placeholder="t('addAccount.proxyPlaceholder')"
           class="ui-input"
         >

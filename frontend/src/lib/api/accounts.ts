@@ -16,6 +16,8 @@ export interface LoginStartRequest {
   account_name: string;
   phone_number: string;
   proxy?: string;
+  proxy_id?: string;
+  proxy_mode?: "inherit" | "direct" | "pool" | "custom";
 }
 
 export interface LoginStartResponse {
@@ -32,6 +34,8 @@ export interface LoginVerifyRequest {
   phone_code_hash: string;
   password?: string;
   proxy?: string;
+  proxy_id?: string;
+  proxy_mode?: "inherit" | "direct" | "pool" | "custom";
 }
 
 export interface LoginVerifyResponse {
@@ -45,6 +49,8 @@ export interface LoginVerifyResponse {
 export interface QrLoginStartRequest {
   account_name: string;
   proxy?: string;
+  proxy_id?: string;
+  proxy_mode?: "inherit" | "direct" | "pool" | "custom";
 }
 
 export interface QrLoginStartResponse {
@@ -327,13 +333,14 @@ export async function exportSessionPackage(
   token: string,
   accountName: string,
   password: string,
+  format: "session" | "tdata" = "session",
 ): Promise<{ filename: string }> {
   const abort = createRequestAbort(LONG_TIMEOUT_MS, null);
   try {
     const res = await fetchWithAuth(
       `/account-tools/${encodeURIComponent(accountName)}/export-session`,
       { "Content-Type": "application/json" },
-      { method: "POST", body: JSON.stringify({ password }), signal: abort.signal },
+      { method: "POST", body: JSON.stringify({ password, format }), signal: abort.signal },
       token,
       LONG_TIMEOUT_MS,
     );
@@ -496,6 +503,8 @@ export interface ImportSessionRequest {
   session_content?: string;
   force?: boolean;
   proxy?: string;
+  proxy_id?: string;
+  proxy_mode?: "inherit" | "direct" | "pool" | "custom";
   tdata_password?: string;
 }
 
@@ -521,6 +530,8 @@ export const importAccountSessionFile = async (
   force = false,
   proxy?: string,
   tdataPassword?: string,
+  proxyId?: string,
+  proxyMode?: string,
 ): Promise<ImportSessionResponse> => {
   const formData = new FormData();
   formData.append("account_name", accountName);
@@ -528,6 +539,8 @@ export const importAccountSessionFile = async (
   formData.append("force", String(force));
   if (proxy) formData.append("proxy", proxy);
   if (tdataPassword) formData.append("tdata_password", tdataPassword);
+  if (proxyId) formData.append("proxy_id", proxyId);
+  if (proxyMode) formData.append("proxy_mode", proxyMode);
   formData.append("file", file);
 
   return requestFormData<ImportSessionResponse>(
@@ -555,6 +568,8 @@ export interface PasskeyLoginRequest {
   api_id?: number;
   api_hash?: string;
   proxy?: string;
+  proxy_id?: string;
+  proxy_mode?: "inherit" | "direct" | "pool" | "custom";
   account_name?: string;
   remark?: string;
   password?: string;

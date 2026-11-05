@@ -23,6 +23,7 @@ const emit = defineEmits<{
 const password = ref('')
 const loading = ref(false)
 const error = ref('')
+const exportFormat = ref<'session' | 'tdata'>('session')
 
 watch(
   () => props.isOpen,
@@ -30,6 +31,7 @@ watch(
     if (!val) return
     password.value = ''
     error.value = ''
+    exportFormat.value = 'session'
   },
 )
 
@@ -43,7 +45,7 @@ const handleExport = async () => {
   loading.value = true
   error.value = ''
   try {
-    await exportSessionPackage(token, props.accountName, password.value)
+    await exportSessionPackage(token, props.accountName, password.value, exportFormat.value)
     toast.success(t('accounts.sessionPackageDownloaded'))
     emit('close')
   } catch (e: unknown) {
@@ -68,6 +70,22 @@ const handleExport = async () => {
       <p class="text-xs text-[var(--sp-text-muted)] leading-relaxed">
         {{ t('accounts.sessionPackageHint') }}
       </p>
+      <div class="space-y-1.5">
+        <span class="ui-label">{{ t('accounts.sessionPackageFormatLabel') }}</span>
+        <div class="flex flex-wrap gap-x-4 gap-y-1.5">
+          <label class="flex items-center gap-1.5 text-xs text-[var(--sp-text-secondary)] cursor-pointer">
+            <input v-model="exportFormat" type="radio" value="session" class="!w-auto">
+            {{ t('accounts.sessionPackageFormatSession') }}
+          </label>
+          <label class="flex items-center gap-1.5 text-xs text-[var(--sp-text-secondary)] cursor-pointer">
+            <input v-model="exportFormat" type="radio" value="tdata" class="!w-auto">
+            {{ t('accounts.sessionPackageFormatTdata') }}
+          </label>
+        </div>
+        <p class="text-xs text-[var(--sp-text-muted)] leading-relaxed">
+          {{ exportFormat === 'tdata' ? t('accounts.sessionPackageFormatTdataHint') : t('accounts.sessionPackageFormatSessionHint') }}
+        </p>
+      </div>
       <div v-if="error" class="ui-alert-error" role="alert">
         {{ error }}
       </div>
