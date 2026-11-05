@@ -1789,6 +1789,8 @@
     "photoMessage": "Photo message",
     "viewFullImage": "View full image",
     "imageLoadFailed": "Failed to load image",
-    "pressButtonFailed": "Failed to press button"
+    "pressButtonFailed": "Failed to press button",
+    "replyKeyboardHint": "Keyboard buttons (tap to send)",
+    "unreadDivider": "Unread messages"
   }
 }

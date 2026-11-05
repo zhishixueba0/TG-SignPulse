@@ -1789,6 +1789,8 @@
     "photoMessage": "图片消息",
     "viewFullImage": "查看原图",
     "imageLoadFailed": "图片加载失败",
-    "pressButtonFailed": "点击按钮失败"
+    "pressButtonFailed": "点击按钮失败",
+    "replyKeyboardHint": "键盘按钮（点击即发送）",
+    "unreadDivider": "以下为未读消息"
   }
 }

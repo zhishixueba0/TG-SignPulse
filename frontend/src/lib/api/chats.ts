@@ -11,7 +11,7 @@ export interface ChatButton {
   row: number;
   col: number;
   text: string;
-  kind: "url" | "callback";
+  kind: "url" | "callback" | "reply";
   url?: string | null;
 }
 
@@ -33,6 +33,7 @@ export interface ChatMessage {
   sender_name: string;
   sender_id?: number | null;
   media_type?: string | null;
+  keyboard_type?: string | null;
   buttons?: ChatButton[];
 }
 

@@ -1,7 +1,9 @@
-"""TelegramService mixin: 聊天中心（对话列表 / 消息收发，仅文本）。
+"""TelegramService mixin: 聊天中心（对话列表 / 消息收发）。
 
 复用账号服务同款取客户端路径：_build_account_client + 账号锁；
 对话与消息只读走 get_dialogs / get_chat_history，发消息走 send_message。
+键盘分两种：内联键盘（url / callback，点按走 request_callback_answer），
+回复键盘（纯文本按钮，点按即把按钮文案当文本消息发出）。
 """
 
 from __future__ import annotations
@@ -56,6 +58,8 @@ def _message_buttons(msg: Any) -> list:
 
     只取可操作的两种：带 url 的链接按钮与带 callback_data 的回调按钮；
     其余类型（switch_inline 等）面板内无法执行，不返回。
+    回复键盘（ReplyKeyboardMarkup）不在这里处理：它的按钮是纯文本，
+    点按即当作普通文本消息发出，走 send_chat_message，不走点按接口。
     """
     markup = getattr(msg, "reply_markup", None)
     rows = getattr(markup, "inline_keyboard", None) if markup is not None else None
@@ -88,6 +92,56 @@ def _message_buttons(msg: Any) -> list:
                     }
                 )
     return buttons
+
+
+def _message_reply_keyboard(msg: Any) -> list:
+    """回复键盘按钮（ReplyKeyboardMarkup，如 SpamBot 的选项）。
+
+    只取纯文本按钮：点按即把按钮文案当作普通文本消息发出。
+    带索取项的按钮（request_contact / request_location / request_poll）
+    面板内无法执行，不返回。
+    """
+    markup = getattr(msg, "reply_markup", None)
+    rows = getattr(markup, "keyboard", None) if markup is not None else None
+    if not rows:
+        return []
+    buttons = []
+    for row_idx, row in enumerate(rows):
+        for col_idx, button in enumerate(row or []):
+            if (
+                getattr(button, "request_contact", None)
+                or getattr(button, "request_location", None)
+                or getattr(button, "request_poll", None)
+            ):
+                continue
+            # 真实 Pyrogram 是 KeyboardButton 对象（.text）；测试替身
+            # 有时直接用纯字符串行，两种都按文本按钮处理。
+            text = (
+                button
+                if isinstance(button, str)
+                else getattr(button, "text", None) or ""
+            )
+            if not str(text).strip():
+                continue
+            buttons.append(
+                {
+                    "row": row_idx,
+                    "col": col_idx,
+                    "text": str(text),
+                    "kind": "reply",
+                    "url": None,
+                }
+            )
+    return buttons
+
+
+def _message_keyboard_type(msg: Any) -> Optional[str]:
+    """消息键盘类型：有可渲染按钮时返回 "inline" 或 "reply"，否则 None。"""
+    if _message_reply_keyboard(msg):
+        return "reply"
+    if _message_buttons(msg):
+        return "inline"
+    return None
 
 
 def _message_media_type(msg: Any) -> Optional[str]:
@@ -221,7 +275,8 @@ class TelegramChatsMixin:
                             else None
                         ),
                         "media_type": _message_media_type(msg),
-                        "buttons": _message_buttons(msg),
+                        "keyboard_type": _message_keyboard_type(msg),
+                        "buttons": _message_buttons(msg) + _message_reply_keyboard(msg),
                     }
                 )
             # get_chat_history 最新在前；消息窗按时间升序展示
@@ -283,6 +338,7 @@ class TelegramChatsMixin:
             "sender_name": _sender_name(sent),
             "sender_id": None,
             "media_type": None,
+            "keyboard_type": None,
             "buttons": [],
         }
 
@@ -360,6 +416,9 @@ class TelegramChatsMixin:
         request_callback_answer（按按钮的 callback_data 发送，不按文本
         发送），返回 Bot 的回答文本/是否弹窗/跳转链接。只操作用户点的
         这一个按钮，不批量、不代发其他内容。
+        回复键盘按钮不在这里处理：它在 _message_buttons 里找不到，
+        会报 BUTTON_NOT_FOUND；前端点回复键盘按钮时直接调发消息接口
+        把按钮文案当文本发出去。
         """
         account_name = self._normalize_account_name(account_name)
         if not self.account_exists(account_name):

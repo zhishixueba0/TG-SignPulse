@@ -17,7 +17,7 @@ import { useAccountsStore } from '../stores/accounts'
 import { useI18n } from '../composables/useI18n'
 import { useToast } from '../composables/useToast'
 import { notifyApiError } from '../lib/notify'
-import { sortChatMessagesAsc, truncateDialogPreview } from '../lib/chat-map'
+import { isNewDay, messageDay, sortChatMessagesAsc, truncateDialogPreview, unreadDividerIndex } from '../lib/chat-map'
 import { devLog } from '../lib/devLog'
 
 const route = useRoute()
@@ -89,7 +89,29 @@ const closeFullImage = () => {
   fullImageUrl.value = ''
 }
 
+const sendText = async (text: string): Promise<boolean> => {
+  const token = getAuthToken()
+  if (!token || !selectedAccount.value || selectedChatId.value === null || !text || sending.value) return false
+  sending.value = true
+  try {
+    const res = await sendChatMessage(token, selectedAccount.value, selectedChatId.value, text)
+    messages.value = sortChatMessagesAsc([...messages.value, res.message])
+    await scrollMessagesToBottom()
+    return true
+  } catch (e: unknown) {
+    notifyApiError(e, 'chats.sendFailed')
+    return false
+  } finally {
+    sending.value = false
+  }
+}
+
 const handlePressButton = async (msg: ChatMessage, button: ChatButton) => {
+  // 回复键盘：点按即把按钮文案当普通文本消息发出去，不走点按接口。
+  if (button.kind === 'reply') {
+    await sendText(button.text)
+    return
+  }
   const token = getAuthToken()
   if (!token || !selectedAccount.value || selectedChatId.value === null || msg.id == null || pressingButton.value) return
   pressingButton.value = true
@@ -126,6 +148,15 @@ const chatTypeLabel = (type: string): string => {
 
 const formatDateTime = (s: string | null | undefined): string =>
   s ? s.slice(0, 16).replace('T', ' ') : ''
+
+/** 气泡内时间只显示时分，日期由分隔条承担。 */
+const formatTime = (s: string | null | undefined): string =>
+  s && s.length >= 16 ? s.slice(11, 16) : formatDateTime(s)
+
+/** “以下为未读消息”分隔线插在第几条消息之前（-1 为不显示）。 */
+const unreadAt = computed(() =>
+  unreadDividerIndex(messages.value, selectedDialog.value?.unread_count ?? 0),
+)
 
 const scrollMessagesToBottom = async () => {
   await nextTick()
@@ -205,20 +236,9 @@ const onAccountChange = (e: Event) => {
 }
 
 const handleSend = async () => {
-  const token = getAuthToken()
   const text = draft.value.trim()
-  if (!token || !selectedAccount.value || selectedChatId.value === null || !text || sending.value) return
-  sending.value = true
-  try {
-    const res = await sendChatMessage(token, selectedAccount.value, selectedChatId.value, text)
-    draft.value = ''
-    messages.value = sortChatMessagesAsc([...messages.value, res.message])
-    await scrollMessagesToBottom()
-  } catch (e: unknown) {
-    notifyApiError(e, 'chats.sendFailed')
-  } finally {
-    sending.value = false
-  }
+  if (!text) return
+  if (await sendText(text)) draft.value = ''
 }
 
 onMounted(async () => {
@@ -319,49 +339,69 @@ onUnmounted(() => {
             <div v-else-if="messages.length === 0" class="py-6 text-xs text-[var(--sp-text-muted)] text-center">
               {{ t('chats.noMessages') }}
             </div>
-            <div
-              v-for="msg in messages"
-              :key="msg.id ?? `${msg.date}-${msg.text.slice(0, 8)}`"
-              class="flex"
-              :class="msg.outgoing ? 'justify-end' : 'justify-start'"
-            >
-              <div
-                class="max-w-[80%] rounded-[var(--sp-radius)] px-3 py-2 text-sm leading-relaxed break-words"
-                :class="msg.outgoing
-                  ? 'bg-sky-500 text-white'
-                  : 'bg-black/[0.04] dark:bg-white/[0.06] text-[var(--sp-text)]'"
-              >
-                <div v-if="!msg.outgoing && msg.sender_name" class="text-[11px] opacity-70 mb-0.5">{{ msg.sender_name }}</div>
-                <button
-                  v-if="msg.media_type === 'photo' && mediaThumbUrl(msg)"
-                  type="button"
-                  class="block mb-1.5 cursor-pointer"
-                  :aria-label="t('chats.viewFullImage')"
-                  :title="t('chats.viewFullImage')"
-                  @click="openFullImage(msg)"
-                >
-                  <img :src="mediaThumbUrl(msg)" :alt="t('chats.photoMessage')" class="max-w-full rounded-md">
-                </button>
-                <div v-else-if="msg.media_type === 'photo'" class="text-xs opacity-70 mb-1.5">{{ t('chats.imageLoadFailed') }}</div>
-                <div class="whitespace-pre-wrap">{{ msg.text }}</div>
-                <div v-if="msg.buttons && msg.buttons.length > 0" class="flex flex-wrap gap-1.5 mt-2">
-                  <button
-                    v-for="button in msg.buttons"
-                    :key="`${button.row}-${button.col}`"
-                    type="button"
-                    class="px-2.5 py-1 rounded-full text-xs border cursor-pointer transition-colors"
-                    :class="msg.outgoing
-                      ? 'border-white/50 text-white hover:bg-white/15'
-                      : 'border-sky-500/60 text-sky-600 dark:text-sky-400 hover:bg-sky-500/10'"
-                    :disabled="pressingButton"
-                    @click="handlePressButton(msg, button)"
-                  >
-                    {{ button.text }}
-                  </button>
-                </div>
-                <div class="text-[11px] opacity-70 mt-1 font-mono text-right">{{ formatDateTime(msg.date) }}</div>
+            <template v-for="(msg, idx) in messages" :key="msg.id ?? `${msg.date}-${msg.text.slice(0, 8)}`">
+              <div v-if="idx === unreadAt" class="flex justify-center py-1">
+                <span class="px-2.5 py-0.5 rounded-full bg-black/[0.05] dark:bg-white/[0.08] text-[11px] text-[var(--sp-text-muted)]">{{ t('chats.unreadDivider') }}</span>
               </div>
-            </div>
+              <div v-if="isNewDay(messages[idx - 1] ?? null, msg)" class="flex justify-center py-1">
+                <span class="px-2.5 py-0.5 rounded-full bg-black/[0.05] dark:bg-white/[0.08] text-[11px] text-[var(--sp-text-muted)] font-mono">{{ messageDay(msg.date) }}</span>
+              </div>
+              <div
+                class="flex"
+                :class="msg.outgoing ? 'justify-end' : 'justify-start'"
+              >
+                <div
+                  class="max-w-[550px] rounded-xl px-3 py-2 text-sm leading-relaxed break-words shadow-sm"
+                  :class="msg.outgoing
+                    ? 'bg-[#f3efe7] dark:bg-[#44403c] text-[var(--sp-text)]'
+                    : 'bg-white dark:bg-white/[0.06] text-[var(--sp-text)] border border-black/[0.06] dark:border-white/10'"
+                >
+                  <button
+                    v-if="msg.media_type === 'photo' && mediaThumbUrl(msg)"
+                    type="button"
+                    class="block mb-1.5 cursor-pointer"
+                    :aria-label="t('chats.viewFullImage')"
+                    :title="t('chats.viewFullImage')"
+                    @click="openFullImage(msg)"
+                  >
+                    <img :src="mediaThumbUrl(msg)" :alt="t('chats.photoMessage')" class="max-w-full rounded-md">
+                  </button>
+                  <div v-else-if="msg.media_type === 'photo'" class="text-xs opacity-70 mb-1.5">{{ t('chats.imageLoadFailed') }}</div>
+                  <div class="whitespace-pre-wrap">{{ msg.text }}</div>
+                  <div v-if="msg.keyboard_type === 'reply' && msg.buttons && msg.buttons.length > 0" class="mt-2">
+                    <div class="text-[11px] text-[var(--sp-text-muted)] mb-1.5">{{ t('chats.replyKeyboardHint') }}</div>
+                    <div class="flex flex-col gap-1.5">
+                      <button
+                        v-for="button in msg.buttons"
+                        :key="`${button.row}-${button.col}`"
+                        type="button"
+                        class="w-full h-7 px-2 rounded-md bg-white dark:bg-white/[0.06] border border-black/10 dark:border-white/15 text-[13px] text-[#374151] dark:text-[var(--sp-text)] text-center cursor-pointer hover:bg-black/[0.03] dark:hover:bg-white/[0.08]"
+                        :disabled="sending || pressingButton"
+                        @click="handlePressButton(msg, button)"
+                      >
+                        {{ button.text }}
+                      </button>
+                    </div>
+                  </div>
+                  <div v-else-if="msg.buttons && msg.buttons.length > 0" class="flex flex-wrap gap-1.5 mt-2">
+                    <button
+                      v-for="button in msg.buttons"
+                      :key="`${button.row}-${button.col}`"
+                      type="button"
+                      class="px-2.5 py-1 rounded-full text-xs border cursor-pointer transition-colors"
+                      :class="msg.outgoing
+                        ? 'border-black/20 text-[var(--sp-text)] hover:bg-black/[0.04] dark:hover:bg-white/[0.08]'
+                        : 'border-sky-500/60 text-sky-600 dark:text-sky-400 hover:bg-sky-500/10'"
+                      :disabled="pressingButton"
+                      @click="handlePressButton(msg, button)"
+                    >
+                      {{ button.text }}
+                    </button>
+                  </div>
+                  <div class="text-[11px] opacity-60 mt-1 text-right">{{ formatTime(msg.date) }}</div>
+                </div>
+              </div>
+            </template>
           </div>
           <div class="border-t border-[var(--sp-border)] p-3 flex items-center gap-2">
             <input

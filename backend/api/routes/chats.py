@@ -37,17 +37,17 @@ class ChatDialogsResponse(BaseModel):
 
 
 class ChatButtonItem(BaseModel):
-    """内联键盘按钮：url 由前端打开，callback 调 Telegram 回调。"""
+    """键盘按钮：url 由前端打开，callback 调 Telegram 回调，reply 当文本发出。"""
 
     row: int
     col: int
     text: str
-    kind: str  # url | callback
+    kind: str  # url | callback | reply
     url: Optional[str] = None
 
 
 class ChatMessageItem(BaseModel):
-    """单条消息（文本 + 图片 + 内联键盘）"""
+    """单条消息（文本 + 图片 + 键盘：内联或回复）"""
 
     id: Optional[int] = None
     date: Optional[str] = None
@@ -56,6 +56,7 @@ class ChatMessageItem(BaseModel):
     sender_name: str = ""
     sender_id: Optional[int] = None
     media_type: Optional[str] = None  # 目前只有 "photo"
+    keyboard_type: Optional[str] = None  # inline | reply
     buttons: list[ChatButtonItem] = []
 
 
