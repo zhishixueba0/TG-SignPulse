@@ -269,7 +269,7 @@
     "addProxy": "Add proxy",
     "routePolicy": "Routing policy",
     "routePolicyHint": "The global proxy is also the default route for new accounts. Each account can use its own route from account routes or its account page.",
-    "globalProxyUrlPlaceholder": "Paste a proxy URL, e.g. socks5://user:pass@host:port",
+    "globalProxyUrlPlaceholder": "Paste a proxy URL, e.g. socks5://user:pass{'@'}host:port",
     "setGlobal": "Set global proxy",
     "clearGlobal": "Clear",
     "testGlobal": "Test global proxy",

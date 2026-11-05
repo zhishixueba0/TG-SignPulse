@@ -269,7 +269,7 @@
     "addProxy": "添加代理",
     "routePolicy": "路由策略",
     "routePolicyHint": "全局代理同时是新建账号的默认线路。账号可在账号路由或账号页单独指定线路。",
-    "globalProxyUrlPlaceholder": "粘贴代理线路，如 socks5://user:pass@host:port",
+    "globalProxyUrlPlaceholder": "粘贴代理线路，如 socks5://user:pass{'@'}host:port",
     "setGlobal": "设置全局代理",
     "clearGlobal": "清除",
     "testGlobal": "测试全局代理",
