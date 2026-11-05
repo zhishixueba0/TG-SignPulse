@@ -132,3 +132,44 @@ def test_canonical_url_roundtrip(memory_session_local):
     proxy_dict = proxy_store.proxy_dict_for_row(row)
     assert proxy_dict is not None
     assert proxy_dict["scheme"] == "mtproxy"
+
+
+@pytest.mark.asyncio
+async def test_sync_skips_invalid_mtproto_secret(memory_session_local, monkeypatch):
+    """订阅源里混进一个非法 MTProto secret 时，整轮同步不能报错中断。
+
+    回归：freeproxydb 曾返回过解不出 16 字节的 secret，create_proxy 抛
+    ValueError 后 run_proxy_sync 整轮标 error，后面的补归属地/中伊剔除/
+    过期清理全都没跑。非法条目只跳过，好条目照常入库，job 正常 done。
+    """
+
+    async def fake_fetch(url):
+        return "\n".join(
+            [
+                "socks5://127.0.0.1:1080",
+                "tg://proxy?server=1.2.3.4&port=443&secret=ZZZNOTHEX",
+                "tg://proxy?server=5.6.7.8&port=443&secret=0123456789abcdef0123456789abcdef",
+            ]
+        )
+
+    async def fake_tcp(host, port, timeout=3.0):
+        return (True, 10)
+
+    async def fake_enrich(proxy_id):
+        return {}
+
+    async def fake_enrich_unknown(limit=100):
+        return 0
+
+    monkeypatch.setattr(proxy_store, "_fetch_subscription_text", fake_fetch)
+    monkeypatch.setattr(proxy_store, "tcp_test_async", fake_tcp)
+    monkeypatch.setattr(proxy_store, "enrich_proxy", fake_enrich)
+    monkeypatch.setattr(proxy_store, "enrich_unknown_proxies", fake_enrich_unknown)
+
+    job = await proxy_store.run_proxy_sync()
+
+    assert job["status"] == "done"
+    assert job["error"] is None
+    assert job["added"] == 2
+    rows = proxy_store.list_proxy_rows()
+    assert {r.host for r in rows} == {"127.0.0.1", "5.6.7.8"}

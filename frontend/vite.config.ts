@@ -35,23 +35,12 @@ export default defineConfig({
       },
       workbox: {
         globPatterns: ['**/*.{js,css,html,ico,png,svg}'],
-        runtimeCaching: [
-          {
-            // 仅缓存常规 GET API；排除鉴权/SSE 流/运行时状态/命中记录等
-            // 敏感或动态数据，避免令牌过期后的旧响应与流式响应被缓存
-            urlPattern: ({ url }) =>
-              url.pathname.startsWith('/api/') &&
-              !url.pathname.startsWith('/api/auth/') &&
-              !url.pathname.startsWith('/api/events/') &&
-              !url.pathname.startsWith('/api/ops/') &&
-              !url.pathname.startsWith('/api/keyword-hits/'),
-            handler: 'NetworkFirst',
-            options: {
-              cacheName: 'api-cache',
-              expiration: { maxEntries: 50, maxAgeSeconds: 300 }
-            }
-          }
-        ]
+        // 注意：这里刻意不配 runtimeCaching 缓存 /api/*。
+        // 之前配过 NetworkFirst 缓存常规 GET API：Service Worker 会把
+        // /api/proxies 这类动态列表响应也写进 api-cache，同步完成前
+        // 抓到的空列表可能被再次返回给页面，导致池子里已有数据、页面
+        // 却一直显示为空；而且 API 请求本身已带 cache: "no-store"。
+        // 静态资源走 precache（按内容哈希版本化）已足够，API 一律走网络。
       }
     })
   ],

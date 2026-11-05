@@ -725,17 +725,29 @@ async def run_proxy_sync() -> dict:
                     last_test_ok=True,
                 )
                 continue
-            row = create_proxy(
-                ptype=cand["ptype"],
-                host=cand["host"],
-                port=cand["port"],
-                username=cand.get("username"),
-                password=cand.get("password"),
-                secret=cand.get("secret"),
-                label=f"自动 {cand['ptype']} {cand['host']}",
-                source="freeproxydb",
-                auto_name=False,
-            )
+            try:
+                row = create_proxy(
+                    ptype=cand["ptype"],
+                    host=cand["host"],
+                    port=cand["port"],
+                    username=cand.get("username"),
+                    password=cand.get("password"),
+                    secret=cand.get("secret"),
+                    label=f"自动 {cand['ptype']} {cand['host']}",
+                    source="freeproxydb",
+                    auto_name=False,
+                )
+            except ValueError as exc:
+                # 订阅源里的个别脏数据（如非法 MTProto secret）只跳过这一条，
+                # 绝不能让整轮同步报错中断（之前一个坏 secret 就把整轮标 error，
+                # 后面的补归属地/中伊剔除/过期清理全都没跑）。
+                logger.warning(
+                    "订阅同步跳过无效代理 %s:%s: %s",
+                    cand["host"],
+                    cand["port"],
+                    exc,
+                )
+                continue
             passed_auto_keys.add(key)
             _sync_job["added"] += 1
             # 新加的自动代理后台补归属地（不阻塞同步结果）
