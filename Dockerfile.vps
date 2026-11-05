@@ -1,0 +1,91 @@
+# v2.7.0 源码构建（VPS 版）: 与上游 Dockerfile 唯一的区别是前端不重新构建。
+# 前端已在本地用 node 24 + vite build 编好（VPS 只有 960MB 内存，跑 npm 构建会 OOM），
+# 这里直接把预编译的 frontend/dist 搬进镜像；后端源码、依赖锁与上游完全一致。
+# 上游 Dockerfile 本身未改动，留作对照。
+FROM scratch AS frontend-builder
+COPY frontend/dist /frontend/dist
+
+# Python runtime.
+# Python 3.11：与 .github/workflows/docker.yml 的测试基线、uv.lock 解析目标一致。
+FROM python:3.11-slim AS production
+
+# Version and build time metadata injected via build args (e.g. CI / Docker build).
+ARG APP_VERSION=dev
+ARG GIT_SHA=unknown
+ARG GIT_BRANCH=unknown
+ARG BUILD_TIME=unknown
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+  PYTHONUNBUFFERED=1 \
+  TZ=Asia/Shanghai \
+  TG_SIGNER_DATA_DIR=/data \
+  APP_VERSION=${APP_VERSION} \
+  GIT_SHA=${GIT_SHA} \
+  GIT_BRANCH=${GIT_BRANCH} \
+  BUILD_TIME=${BUILD_TIME}
+
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y --no-install-recommends build-essential tzdata gosu libglib2.0-0 && \
+  rm -rf /var/lib/apt/lists/*
+
+# 依赖单独成层：仅 pyproject.toml / uv.lock 变化才失效，
+# 源码改动不会触发依赖重装。uv.lock 是依赖的唯一真相来源——
+# 历史上此处曾手工罗列一套依赖覆盖 pip 解析结果，导致镜像里的
+# fastapi 0.109.2 + httpx 0.28 组合把 starlette TestClient 打挂，
+# 且镜像版本与 pyproject 声明静默分叉。
+# 注意：pyotp 直接使用官方依赖（pip 安装），仓库不再提供根级 pyotp.py shim，勿在此 COPY。
+COPY pyproject.toml README.md uv.lock /app/
+COPY tg_signer/__init__.py /app/tg_signer/__init__.py
+
+# tgcrypto 为 C 扩展，仅在 amd64 安装；arm64 走 kurigram 纯 Python 回退
+# （ kurigram 启动时会打印 TgCrypto missing 提示，属预期行为）。
+ARG TARGETPLATFORM
+RUN pip install --no-cache-dir uv && \
+  if [ "${TARGETPLATFORM:-}" = "linux/amd64" ] || [ "$(uname -m)" = "x86_64" ]; then \
+    uv export --format requirements-txt --no-hashes --extra speedup --extra tdata --no-emit-project \
+      -o /tmp/requirements.txt; \
+  else \
+    uv export --format requirements-txt --no-hashes --extra tdata --no-emit-project \
+      -o /tmp/requirements.txt; \
+  fi && \
+  pip install --no-cache-dir -r /tmp/requirements.txt && \
+  rm -f /tmp/requirements.txt
+
+COPY backend /app/backend
+COPY tg_signer /app/tg_signer
+COPY plugins /app/plugins
+COPY community_plugins /app/community_plugins
+
+# 项目本体：依赖已由上面的锁装齐，--no-deps 避免二次解析破坏锁的确定性。
+RUN pip install --no-cache-dir --no-deps .
+
+# Frontend static files served from /web.
+COPY --from=frontend-builder /frontend/dist /web
+
+# Data dir + non-root user + entrypoint.
+ARG APP_UID=10001
+ARG APP_GID=10001
+RUN mkdir -p /data && \
+  groupadd -r -g ${APP_GID} app && \
+  useradd -r -u ${APP_UID} -g app -d /app -s /usr/sbin/nologin app && \
+  chown -R app:app /data
+
+# 工作区文件是 660/2770 权限打包进来的，app 用户（10001）读不到；
+# 构建时统一放开读+执行权限，否则容器启动即 PermissionError。
+RUN chmod -R a+rX /app /web
+
+COPY docker/entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+# 运行期身份由 entrypoint.sh 统一通过 gosu 降权至 app (10001:10001)；
+# 入口保持 root 以便在启动时自动自愈挂载卷中历史文件的属主与读写权限（兼容旧版本平滑升级）。
+
+EXPOSE 8080
+
+# Healthcheck uses the PORT env var.
+HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
+  CMD python -c "import os, urllib.request; urllib.request.urlopen(f'http://localhost:{os.getenv(\"PORT\", \"8080\")}/healthz').read()"
+
+# Start with env-driven PORT (Zeabur sets this automatically).
+ENTRYPOINT ["/entrypoint.sh"]

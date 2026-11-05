@@ -1,15 +1,15 @@
+# TG-SignPulse v2.7.0（GitHub 源码自建），与旧版 1.0.130 并行。
+# 旧版：/opt/tg-signpulse，容器 tg-signpulse，127.0.0.1:18765，不动。
+# 本版：/opt/fork-tg-signpulse，容器 tg-signpulse-v270，127.0.0.1:18766，数据卷独立。
+# telegram-manager：/opt/telegram-manager，127.0.0.1:8000，不动。
 services:
   app:
-    image: ghcr.io/silentely/tg-signpulse:latest
-    container_name: tg-signpulse
+    image: ghcr.io/zhishixueba0/tg-signpulse:latest
+    container_name: tg-signpulse-v270
     ports:
-      - "8080:8080"
-    mem_limit: 768m
+      - "127.0.0.1:18766:8080"
+    mem_limit: 1g
     cpus: 1.0
-    # 由 entrypoint.sh 自动检查并修复挂载卷权限（兼容旧版本平滑升级），
-    # 并强制通过 gosu 降权至 10001:10001 运行业务进程。
-    # 宿主机卷属主已预先修正为 10001:10001 时，亦可显式解开下行：
-    # user: "10001:10001"
     volumes:
       - ./data:/data
     environment:
@@ -19,9 +19,6 @@ services:
       - LOG_LEVEL=INFO
       - APP_LEGACY_TASKS_READONLY=1
       - APP_SCHEDULER_LOCK=1
-      # - APP_SECRET_KEY=replace-me
-      # - ADMIN_PASSWORD=replace-me
-      # - ENABLE_API_DOCS=false
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/readyz', timeout=3)"]
       interval: 30s
