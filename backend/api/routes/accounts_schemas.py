@@ -279,6 +279,32 @@ class ResetAuthorizationsResponse(BaseModel):
     message: str
 
 
+class SessionSettingsResponse(BaseModel):
+    """Telegram 原生保留时长（服务端执行，面板只负责设置与读取）"""
+
+    authorization_ttl_days: Optional[int] = None
+    account_ttl_days: Optional[int] = None
+
+
+class SessionSettingsUpdateRequest(BaseModel):
+    """保留时长更新：两项可选，至少填一项；超范围 400"""
+
+    authorization_ttl_days: Optional[int] = None
+    account_ttl_days: Optional[int] = None
+
+    @validator("authorization_ttl_days")
+    def validate_authorization_ttl(cls, v):
+        if v is not None and not 7 <= int(v) <= 365:
+            raise ValueError("authorization_ttl_days must be between 7 and 365")
+        return v
+
+    @validator("account_ttl_days")
+    def validate_account_ttl(cls, v):
+        if v is not None and not 30 <= int(v) <= 730:
+            raise ValueError("account_ttl_days must be between 30 and 730")
+        return v
+
+
 class OfficialMessageItem(BaseModel):
     id: Optional[int] = None
     date: Optional[str] = None

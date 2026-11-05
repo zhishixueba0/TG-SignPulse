@@ -478,11 +478,16 @@ class TelegramAccountsMixin:
         self,
         account_name: str,
         no_updates: bool = True,
+        api_id: Optional[int] = None,
+        api_hash: Optional[str] = None,
     ):
         """
         构建账号客户端（辅助方法，减少代码重复）。
 
-        返回 (client, proxy_dict) 元组。
+        返回 (client, proxy_dict) 元组。显式传入 api_id/api_hash 时
+        （如会话导出：候选与主客户端用同一份解析后的凭据），
+        新建客户端用这份凭据；已缓存的客户端仍按原有缓存语义复用
+        （跨应用 Accept 本身是允许的，见导出 RCA）。
         """
         from tg_signer.core import get_client
 
@@ -531,6 +536,8 @@ class TelegramAccountsMixin:
             session_string=session_string,
             in_memory=in_memory,
             no_updates=no_updates,
+            api_id=api_id,
+            api_hash=api_hash,
             **device_kwargs,
         )
 

@@ -10,7 +10,7 @@ import base64
 import logging
 from typing import Literal, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel
 
 from backend.api.routes.accounts_helpers import (
@@ -55,6 +55,8 @@ from backend.api.routes.accounts_schemas import (
     QrLoginStartResponse,
     QrLoginStatusResponse,
     ResetAuthorizationsResponse,
+    SessionSettingsResponse,
+    SessionSettingsUpdateRequest,
     StandaloneSessionExportRequest,
     StandaloneSessionExportResponse,
     TerminateDeviceResponse,
@@ -979,6 +981,90 @@ async def reset_account_authorizations(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="清退其他设备失败，请稍后重试",
         )
+
+
+@router.get("/{account_name}/session-settings", response_model=SessionSettingsResponse)
+async def get_account_session_settings(
+    account_name: str,
+    http_request: Request,
+    response: Response,
+    current_user: User = Depends(get_current_user),
+):
+    """读取账号的 Telegram 原生保留时长（读限流 40 次/60s，no-store）。"""
+    _apply_rate_limit(
+        "accounts.session_settings.read",
+        http_request,
+        "读取保留时长过于频繁，请稍后再试",
+        account_name,
+        max_attempts=40,
+        window_seconds=60,
+        block_seconds=60,
+    )
+    response.headers["Cache-Control"] = "no-store"
+    try:
+        account_name = validate_storage_name(account_name, field_name="account_name")
+        settings = await get_telegram_service().get_session_settings(account_name)
+        return SessionSettingsResponse(**settings)
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)
+        ) from e
+    except AccountLockTimeout:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail="ACCOUNT_BUSY"
+        ) from None
+    except Exception as e:
+        logger.error("读取保留时长失败: %s", e, exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="读取保留时长失败，请稍后重试",
+        ) from e
+
+
+@router.put("/{account_name}/session-settings", response_model=SessionSettingsResponse)
+async def update_account_session_settings(
+    account_name: str,
+    request: SessionSettingsUpdateRequest,
+    http_request: Request,
+    response: Response,
+    current_user: User = Depends(get_current_user),
+):
+    """设置账号的 Telegram 原生保留时长（写限流 12 次/600s，no-store）。
+
+    两项都空 → SESSION_SETTINGS_EMPTY；超范围 → *_TTL_INVALID（400）。
+    """
+    _apply_rate_limit(
+        "accounts.session_settings.write",
+        http_request,
+        "设置保留时长过于频繁，请稍后再试",
+        account_name,
+        max_attempts=12,
+        window_seconds=600,
+        block_seconds=600,
+    )
+    response.headers["Cache-Control"] = "no-store"
+    try:
+        account_name = validate_storage_name(account_name, field_name="account_name")
+        settings = await get_telegram_service().set_session_settings(
+            account_name,
+            authorization_ttl_days=request.authorization_ttl_days,
+            account_ttl_days=request.account_ttl_days,
+        )
+        return SessionSettingsResponse(**settings)
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)
+        ) from e
+    except AccountLockTimeout:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail="ACCOUNT_BUSY"
+        ) from None
+    except Exception as e:
+        logger.error("设置保留时长失败: %s", e, exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="设置保留时长失败，请稍后重试",
+        ) from e
 
 
 @router.get(

@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import time
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -68,6 +67,10 @@ class ProxyBatchDeleteRequest(BaseModel):
 
 class ProxyRenameRequest(BaseModel):
     label: str
+
+
+class ProxyTestRequest(BaseModel):
+    mode: str = "probe"  # probe | tcp
 
 
 class ProxyTestAllRequest(BaseModel):
@@ -223,36 +226,86 @@ async def rename_proxy(
 
 
 @router.post("/{proxy_id}/test")
-async def test_proxy(proxy_id: str, current_user: User = Depends(get_current_user)):
+async def test_proxy(
+    proxy_id: str,
+    request: Optional[ProxyTestRequest] = None,
+    current_user: User = Depends(get_current_user),
+):
+    """手动测试单个代理：强制真实探测（跳过 600s 缓存），不走熔断门禁，
+    失败不累计熔断、不写缓存。latency_ms 是探测内实测延迟（缓存命中时
+    为 None，绝不把 0ms 当实测延迟）。mode=tcp 时只测端口连通性，
+    明确标注“端口通（不等同于可用）”。"""
     from backend.utils.time import utc_now_naive
 
+    mode = ((request.mode if request else "probe") or "probe").strip().lower()
+    if mode not in ("probe", "tcp"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="mode 只能是 probe 或 tcp",
+        )
     row = proxy_store.get_proxy_row(proxy_id)
     if row is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="代理不存在")
+    now = utc_now_naive()
+    if mode == "tcp":
+        ok, latency = await proxy_store.tcp_test_async(row.host, row.port)
+        code = "TCP_OK" if ok else "PROXY_CONNECT_FAILED"
+        detail = (
+            "端口通（不等同于可用）：仅证明 TCP 端口可连，不能证明能登录 Telegram"
+            if ok
+            else "端口不可达（3 秒内无响应）"
+        )
+        proxy_store.update_proxy_enrichment(
+            row.id,
+            latency_ms=latency,
+            last_tested_at=now,
+            last_test_ok=ok,
+        )
+        proxy_store.record_proxy_test(
+            row.id, ok=ok, latency_ms=latency, code=code, source="manual"
+        )
+        return {
+            "success": True,
+            "ok": ok,
+            "latency_ms": latency,
+            "cached": False,
+            "code": code,
+            "detail": detail,
+            "last_test_ok": ok,
+        }
     proxy_dict = proxy_store.proxy_dict_for_row(row)
     if proxy_dict is None:
         return {
             "success": False,
             "ok": False,
             "latency_ms": None,
+            "cached": False,
+            "code": "PROXY_NOT_CONFIGURED",
             "detail": "代理配置无效",
             "last_test_ok": False,
         }
-    started = time.monotonic()
-    status_value, detail = await probe_proxy_exit(proxy_dict)
-    latency = int((time.monotonic() - started) * 1000)
-    ok = status_value.name == "OK"
+    outcome = await probe_proxy_exit(proxy_dict, force=True, manual=True)
+    ok = outcome.status.name == "OK"
     proxy_store.update_proxy_enrichment(
         row.id,
-        latency_ms=latency if ok else None,
-        last_tested_at=utc_now_naive(),
+        latency_ms=outcome.latency_ms if ok else None,
+        last_tested_at=now,
         last_test_ok=ok,
+    )
+    proxy_store.record_proxy_test(
+        row.id,
+        ok=ok,
+        latency_ms=outcome.latency_ms if ok else None,
+        code=outcome.code,
+        source="manual",
     )
     return {
         "success": True,
         "ok": ok,
-        "latency_ms": latency if ok else None,
-        "detail": detail,
+        "latency_ms": outcome.latency_ms if ok else None,
+        "cached": outcome.cached,
+        "code": outcome.code,
+        "detail": outcome.detail,
         "last_test_ok": ok,
     }
 
@@ -442,9 +495,31 @@ async def test_global_proxy(current_user: User = Depends(get_current_user)):
 
     url = get_config_service().get_global_proxy()
     if not url:
-        return {"success": False, "ok": False, "detail": "全局代理未设置"}
+        return {
+            "success": False,
+            "ok": False,
+            "latency_ms": None,
+            "cached": False,
+            "code": "PROXY_NOT_CONFIGURED",
+            "detail": "全局代理未设置",
+        }
     proxy_dict = build_proxy_dict(url)
     if not proxy_dict:
-        return {"success": False, "ok": False, "detail": "全局代理格式无效"}
-    status_value, detail = await probe_proxy_exit(proxy_dict)
-    return {"success": True, "ok": status_value.name == "OK", "detail": detail}
+        return {
+            "success": False,
+            "ok": False,
+            "latency_ms": None,
+            "cached": False,
+            "code": "PROXY_NOT_CONFIGURED",
+            "detail": "全局代理格式无效",
+        }
+    outcome = await probe_proxy_exit(proxy_dict, force=True, manual=True)
+    ok = outcome.status.name == "OK"
+    return {
+        "success": True,
+        "ok": ok,
+        "latency_ms": outcome.latency_ms if ok else None,
+        "cached": outcome.cached,
+        "code": outcome.code,
+        "detail": outcome.detail,
+    }

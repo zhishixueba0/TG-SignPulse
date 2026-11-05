@@ -397,3 +397,293 @@ async def test_migrate_candidate_dc_fails_closed_on_unknown_dc():
 
     with pytest.raises(ValueError, match="无法确定目标 DC 999 的连接端点"):
         await _migrate_candidate_dc(mock_client, target_dc=999)
+
+
+@pytest.mark.asyncio
+async def test_export_pre_migrates_candidate_to_account_dc():
+    """接受前先把候选迁到账号的 DC（DC1 账号 happy path，根因修复）。"""
+    account_name = "test_acc_dc1"
+    mock_service = MagicMock()
+    mock_service.account_exists.return_value = True
+    mock_service.verify_account_proxy = AsyncMock()
+
+    mock_main_client = MagicMock()
+    mock_main_client.is_connected = True
+    mock_main_client.invoke = AsyncMock()
+    mock_service._build_account_client.return_value = (mock_main_client, None)
+
+    mock_candidate_client = MagicMock()
+    mock_candidate_client.is_connected = False
+    mock_candidate_client.connect = AsyncMock()
+    mock_candidate_client.disconnect = AsyncMock()
+    mock_candidate_client.session = MagicMock()
+    mock_candidate_client.session.stop = AsyncMock()
+    mock_candidate_client.export_session_string = AsyncMock(
+        return_value="dc1_session_str"
+    )
+    mock_candidate_client.storage = MagicMock()
+    # 候选默认 DC2，账号在 DC1：必须先迁移；随后读 DC 返回 1
+    mock_candidate_client.storage.dc_id = AsyncMock(side_effect=[2, 1, 1])
+    mock_candidate_client.storage.auth_key = AsyncMock()
+    mock_candidate_client.storage.user_id = AsyncMock(return_value=555)
+    mock_candidate_client.storage.is_bot = AsyncMock()
+    mock_candidate_client.storage.test_mode = AsyncMock(return_value=False)
+
+    fake_raw_user = MagicMock(spec=raw.types.User)
+    fake_raw_user.id = 555
+    fake_auth = MagicMock(spec=raw.types.auth.Authorization)
+    fake_auth.user = fake_raw_user
+
+    exported_token = raw.types.auth.LoginToken(expires=100, token=b"dc1_token")
+    success_token = raw.types.auth.LoginTokenSuccess(authorization=fake_auth)
+    mock_candidate_client.invoke = AsyncMock(
+        side_effect=[exported_token, success_token]
+    )
+
+    with (
+        patch(
+            "backend.services.telegram.session_exporter.Client",
+            return_value=mock_candidate_client,
+        ),
+        patch(
+            "backend.services.telegram.session_exporter.resolve_telegram_api_credentials",
+            return_value=(12345, "test_hash"),
+        ),
+        patch(
+            "backend.services.telegram.session_exporter.get_config_service"
+        ) as mock_cfg_svc,
+        patch(
+            "backend.services.telegram.session_exporter.get_account_session_identity",
+            return_value={"dc_id": 1, "user_id": 555},
+        ),
+        patch("backend.services.telegram.session_exporter.Auth") as mock_auth_cls,
+        patch("backend.services.telegram.session_exporter.Session") as mock_session_cls,
+    ):
+        mock_cfg_svc.return_value.get_global_settings.return_value = {
+            "require_proxy_for_telegram": False
+        }
+        mock_cfg_svc.return_value.get_telegram_config.return_value = {}
+
+        mock_auth_instance = MagicMock()
+        mock_auth_instance.create = AsyncMock(return_value=b"new_auth_key_dc1")
+        mock_auth_cls.return_value = mock_auth_instance
+        mock_session_instance = MagicMock()
+        mock_session_instance.start = AsyncMock()
+        mock_session_cls.return_value = mock_session_instance
+
+        result = await create_standalone_session_export(
+            account_name,
+            timeout_seconds=10.0,
+            service=mock_service,
+        )
+
+    assert result.success is True
+    assert result.session_string == "dc1_session_str"
+    assert result.dc_id == 1
+    # 接受前迁移恰好一次（到 DC1）；轮询直接 Success，不再迁移
+    assert mock_auth_cls.call_count == 1
+    # 主客户端用了与候选同一份凭据
+    mock_service._build_account_client.assert_called_with(
+        account_name, no_updates=True, api_id=12345, api_hash="test_hash"
+    )
+
+
+@pytest.mark.asyncio
+async def test_export_poll_migrate_to_never_migrates_after_accept():
+    """接受后轮询收到 LoginTokenMigrateTo 时不再迁移，报明确 DC 错误。
+
+    这是 EXPORT_LOGIN_TIMEOUT 根因的核心回归用例：迁移会丢弃已接受
+    token 所属的 auth key，轮询将永远等不到 Success。
+    """
+    account_name = "test_acc_poll_migrate"
+    mock_service = MagicMock()
+    mock_service.account_exists.return_value = True
+    mock_service.verify_account_proxy = AsyncMock()
+
+    mock_main_client = MagicMock()
+    mock_main_client.is_connected = True
+    accept_auth = MagicMock(spec=raw.types.auth.Authorization)
+    accept_auth.hash = 424242
+    mock_main_client.invoke = AsyncMock(return_value=accept_auth)
+    mock_service._build_account_client.return_value = (mock_main_client, None)
+
+    mock_candidate_client = MagicMock()
+    mock_candidate_client.is_connected = False
+    mock_candidate_client.connect = AsyncMock()
+    mock_candidate_client.disconnect = AsyncMock()
+    mock_candidate_client.session = MagicMock()
+    mock_candidate_client.session.stop = AsyncMock()
+    mock_candidate_client.storage = MagicMock()
+    mock_candidate_client.storage.dc_id = AsyncMock(return_value=1)
+    mock_candidate_client.storage.test_mode = AsyncMock(return_value=False)
+
+    exported_token = raw.types.auth.LoginToken(expires=100, token=b"tok_bytes")
+    migrate_token = raw.types.auth.LoginTokenMigrateTo(dc_id=1, token=b"mig_tok")
+    mock_candidate_client.invoke = AsyncMock(
+        side_effect=[exported_token, migrate_token]
+    )
+
+    with (
+        patch(
+            "backend.services.telegram.session_exporter.Client",
+            return_value=mock_candidate_client,
+        ),
+        patch(
+            "backend.services.telegram.session_exporter.resolve_telegram_api_credentials",
+            return_value=(12345, "test_hash"),
+        ),
+        patch(
+            "backend.services.telegram.session_exporter.get_config_service"
+        ) as mock_cfg_svc,
+        patch(
+            "backend.services.telegram.session_exporter.get_account_session_identity",
+            return_value={"dc_id": 1, "user_id": 555},
+        ),
+        patch("backend.services.telegram.session_exporter.Auth") as mock_auth_cls,
+    ):
+        mock_cfg_svc.return_value.get_global_settings.return_value = {
+            "require_proxy_for_telegram": False
+        }
+        mock_cfg_svc.return_value.get_telegram_config.return_value = {}
+
+        result = await create_standalone_session_export(
+            account_name,
+            timeout_seconds=10.0,
+            service=mock_service,
+        )
+
+    assert result.success is False
+    assert "EXPORT_LOGIN_DC_MISMATCH" in (result.error or "")
+    # 接受前候选已在 DC1，无迁移；接受后轮询 MigrateTo 也不迁移
+    assert mock_auth_cls.call_count == 0
+    mock_candidate_client.disconnect.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_export_initial_migration_exhaustion_fails_closed():
+    """接受前 3 次迁移仍需迁移时明确失败，不接受 MigrateTo 的 token。"""
+    account_name = "test_acc_mig_exhaust"
+    mock_service = MagicMock()
+    mock_service.account_exists.return_value = True
+    mock_service.verify_account_proxy = AsyncMock()
+
+    mock_candidate_client = MagicMock()
+    mock_candidate_client.is_connected = False
+    mock_candidate_client.connect = AsyncMock()
+    mock_candidate_client.disconnect = AsyncMock()
+    mock_candidate_client.session = MagicMock()
+    mock_candidate_client.session.stop = AsyncMock()
+    mock_candidate_client.storage = MagicMock()
+    mock_candidate_client.storage.dc_id = AsyncMock(return_value=2)
+    mock_candidate_client.storage.auth_key = AsyncMock()
+    mock_candidate_client.storage.test_mode = AsyncMock(return_value=False)
+
+    migrate_token = raw.types.auth.LoginTokenMigrateTo(dc_id=4, token=b"mig_tok")
+    mock_candidate_client.invoke = AsyncMock(return_value=migrate_token)
+
+    with (
+        patch(
+            "backend.services.telegram.session_exporter.Client",
+            return_value=mock_candidate_client,
+        ),
+        patch(
+            "backend.services.telegram.session_exporter.resolve_telegram_api_credentials",
+            return_value=(12345, "test_hash"),
+        ),
+        patch(
+            "backend.services.telegram.session_exporter.get_config_service"
+        ) as mock_cfg_svc,
+        patch(
+            "backend.services.telegram.session_exporter.get_account_session_identity",
+            return_value=None,
+        ),
+        patch("backend.services.telegram.session_exporter.Auth") as mock_auth_cls,
+        patch("backend.services.telegram.session_exporter.Session") as mock_session_cls,
+    ):
+        mock_cfg_svc.return_value.get_global_settings.return_value = {
+            "require_proxy_for_telegram": False
+        }
+        mock_cfg_svc.return_value.get_telegram_config.return_value = {}
+
+        mock_auth_instance = MagicMock()
+        mock_auth_instance.create = AsyncMock(return_value=b"new_auth_key")
+        mock_auth_cls.return_value = mock_auth_instance
+        mock_session_instance = MagicMock()
+        mock_session_instance.start = AsyncMock()
+        mock_session_cls.return_value = mock_session_instance
+
+        result = await create_standalone_session_export(
+            account_name,
+            timeout_seconds=10.0,
+            service=mock_service,
+        )
+
+    assert result.success is False
+    assert "EXPORT_TOKEN_FAILED" in (result.error or "")
+    assert mock_auth_cls.call_count == 3
+    # 从未走到 Accept
+    mock_service._build_account_client.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_export_timeout_rollback_406_classified():
+    """轮询超时且回滚被 406 拒绝时，错误里注明 24h 后可清退。"""
+    account_name = "test_acc_timeout_406"
+    mock_service = MagicMock()
+    mock_service.account_exists.return_value = True
+    mock_service.verify_account_proxy = AsyncMock()
+
+    mock_main_client = MagicMock()
+    mock_main_client.is_connected = True
+    accept_auth = MagicMock(spec=raw.types.auth.Authorization)
+    accept_auth.hash = 777001
+    mock_main_client.invoke = AsyncMock(
+        side_effect=[
+            accept_auth,
+            Exception("406 FRESH_RESET_AUTHORISATION_FORBIDDEN"),
+        ]
+    )
+    mock_service._build_account_client.return_value = (mock_main_client, None)
+
+    mock_candidate_client = MagicMock()
+    mock_candidate_client.is_connected = False
+    mock_candidate_client.connect = AsyncMock()
+    mock_candidate_client.disconnect = AsyncMock()
+    mock_candidate_client.storage = MagicMock()
+    mock_candidate_client.storage.dc_id = AsyncMock(return_value=1)
+    mock_candidate_client.storage.test_mode = AsyncMock(return_value=False)
+
+    exported_token = raw.types.auth.LoginToken(expires=100, token=b"tok_bytes")
+    mock_candidate_client.invoke = AsyncMock(return_value=exported_token)
+
+    with (
+        patch(
+            "backend.services.telegram.session_exporter.Client",
+            return_value=mock_candidate_client,
+        ),
+        patch(
+            "backend.services.telegram.session_exporter.resolve_telegram_api_credentials",
+            return_value=(12345, "test_hash"),
+        ),
+        patch(
+            "backend.services.telegram.session_exporter.get_config_service"
+        ) as mock_cfg_svc,
+        patch(
+            "backend.services.telegram.session_exporter.get_account_session_identity",
+            return_value={"dc_id": 1, "user_id": 555},
+        ),
+    ):
+        mock_cfg_svc.return_value.get_global_settings.return_value = {
+            "require_proxy_for_telegram": False
+        }
+        mock_cfg_svc.return_value.get_telegram_config.return_value = {}
+
+        result = await create_standalone_session_export(
+            account_name,
+            timeout_seconds=5.0,
+            service=mock_service,
+        )
+
+    assert result.success is False
+    assert "EXPORT_LOGIN_TIMEOUT" in (result.error or "")
+    assert "24h" in (result.error or "")

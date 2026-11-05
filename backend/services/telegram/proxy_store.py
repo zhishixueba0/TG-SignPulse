@@ -56,6 +56,14 @@ _SUBSCRIPTION_FILE = ".proxy_subscription.json"
 _GEO_ENRICH_BATCH = 100
 _GEO_ENRICH_INTERVAL = 1.4
 
+# 单测历史 sidecar（Drive 1.0.129 的 history 结构，每条 {t, ok, ms, c, s}）。
+# 不进 SQLAlchemy 表：create_all 不会给已建库补列，改表需手工迁移；
+# 历史只是展示用数据，放 workdir 下的 JSON 文件足够。
+# 每代理只留最近 _PROXY_HISTORY_LIMIT 条，列表展示 _PROXY_HISTORY_SHOWN 条。
+_PROXY_TEST_HISTORY_FILE = ".proxy_test_history.json"
+_PROXY_HISTORY_LIMIT = 30
+_PROXY_HISTORY_SHOWN = 20
+
 # 后台任务状态（进程内，与 telegram-manager 的 _proxy_sync_job 同款做法）
 _sync_job: dict[str, Any] = {
     "status": "idle",
@@ -137,6 +145,85 @@ def accounts_count_by_proxy() -> dict[str, int]:
     return counts
 
 
+def _proxy_test_history_path() -> Path:
+    return get_settings().resolve_workdir() / _PROXY_TEST_HISTORY_FILE
+
+
+def _load_proxy_test_history() -> dict[str, Any]:
+    """Load history sidecar, memoized on file mtime (list serializes per row)."""
+    from backend.utils.atomic_io import read_json_safe
+
+    path = _proxy_test_history_path()
+    try:
+        mtime = path.stat().st_mtime_ns
+    except OSError:
+        return {}
+    cached_mtime = _HISTORY_CACHE.get("mtime")
+    if cached_mtime == mtime and isinstance(_HISTORY_CACHE.get("data"), dict):
+        return _HISTORY_CACHE["data"]
+    data = read_json_safe(path, default={})
+    if not isinstance(data, dict):
+        data = {}
+    _HISTORY_CACHE["mtime"] = mtime
+    _HISTORY_CACHE["data"] = data
+    return data
+
+
+_HISTORY_CACHE: dict[str, Any] = {"mtime": None, "data": {}}
+
+
+def record_proxy_test(
+    proxy_id: str,
+    *,
+    ok: bool,
+    latency_ms: Optional[int] = None,
+    code: Optional[str] = None,
+    source: str = "manual",
+) -> None:
+    """Append one probe result to the per-proxy history (cap 30)."""
+    if not proxy_id:
+        return
+    try:
+        data = _load_proxy_test_history()
+        entries = data.get(proxy_id)
+        if not isinstance(entries, list):
+            entries = []
+        entries.append(
+            {
+                "t": utc_now_iso(),
+                "ok": bool(ok),
+                "ms": latency_ms,
+                "c": code or ("OK" if ok else "PROXY_PROBE_UNAVAILABLE"),
+                "s": source,
+            }
+        )
+        data[proxy_id] = entries[-_PROXY_HISTORY_LIMIT:]
+        write_json_atomic(_proxy_test_history_path(), data)
+    except Exception as exc:
+        logger.warning("记录代理测试历史失败 proxy=%s: %s", proxy_id, exc)
+
+
+def get_proxy_test_history(proxy_id: str, limit: int = _PROXY_HISTORY_SHOWN) -> list:
+    """Latest probe history entries for one proxy (newest last)."""
+    if not proxy_id:
+        return []
+    try:
+        entries = _load_proxy_test_history().get(proxy_id)
+        if not isinstance(entries, list):
+            return []
+        return entries[-max(1, limit) :]
+    except Exception:
+        return []
+
+
+def get_proxy_last_test_code(proxy_id: str) -> Optional[str]:
+    history = get_proxy_test_history(proxy_id, limit=1)
+    if not history:
+        return None
+    code = history[-1].get("c")
+    return str(code) if code else None
+
+
 def serialize_proxy(row: Proxy, accounts_count: int = 0) -> dict:
     return {
         "id": row.id,
@@ -159,6 +246,8 @@ def serialize_proxy(row: Proxy, accounts_count: int = 0) -> dict:
         if row.last_tested_at
         else None,
         "last_test_ok": row.last_test_ok,
+        "last_test_code": get_proxy_last_test_code(row.id),
+        "history": get_proxy_test_history(row.id),
         "created_at": row.created_at.isoformat() if row.created_at else None,
         "display_url": canonical_display_url(row),
         "accounts_count": accounts_count,
@@ -843,18 +932,38 @@ async def run_test_all(mode: str = "probe") -> dict:
                     update_proxy_enrichment(
                         row.id, latency_ms=latency, last_tested_at=now
                     )
+                    record_proxy_test(
+                        row.id,
+                        ok=ok,
+                        latency_ms=latency,
+                        code="TCP_OK" if ok else "PROXY_CONNECT_FAILED",
+                        source="auto",
+                    )
                 else:
                     proxy_dict = proxy_dict_for_row(row)
                     if proxy_dict is None:
                         ok = False
+                        record_proxy_test(
+                            row.id,
+                            ok=False,
+                            code="PROXY_NOT_CONFIGURED",
+                            source="auto",
+                        )
                     else:
-                        status, _detail = await probe_proxy_exit(proxy_dict)
-                        ok = status.name == "OK"
+                        outcome = await probe_proxy_exit(proxy_dict)
+                        ok = outcome.status.name == "OK"
                         update_proxy_enrichment(
                             row.id,
-                            latency_ms=None,
+                            latency_ms=outcome.latency_ms if ok else None,
                             last_tested_at=now,
                             last_test_ok=ok,
+                        )
+                        record_proxy_test(
+                            row.id,
+                            ok=ok,
+                            latency_ms=outcome.latency_ms if ok else None,
+                            code=outcome.code,
+                            source="auto",
                         )
                 _test_all_job["done"] += 1
                 _test_all_job["ok" if ok else "fail"] += 1

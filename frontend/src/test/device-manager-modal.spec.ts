@@ -72,6 +72,14 @@ describe('DeviceManagerModal', () => {
       success: true,
       message: '已成功清退其他设备',
     })
+    vi.spyOn(api, 'getSessionSettings').mockResolvedValue({
+      authorization_ttl_days: 180,
+      account_ttl_days: 540,
+    })
+    vi.spyOn(api, 'updateSessionSettings').mockResolvedValue({
+      authorization_ttl_days: 180,
+      account_ttl_days: 540,
+    })
   })
 
   afterEach(() => {
@@ -275,6 +283,127 @@ describe('DeviceManagerModal', () => {
 
     expect(document.body.textContent).not.toContain('Stale Account Laptop')
     expect(document.body.textContent).toContain('MacBook Pro')
+
+    wrapper.unmount()
+  })
+
+  it('保留时长下拉默认 180/540 天，读取服务端值后回填', async () => {
+    const settingsSpy = vi.spyOn(api, 'getSessionSettings')
+    settingsSpy.mockResolvedValue({
+      authorization_ttl_days: 90,
+      account_ttl_days: 365,
+    })
+
+    const wrapper = mount(DeviceManagerModal, {
+      props: { isOpen: true, accountName: 'test-account' },
+      attachTo: document.body,
+    })
+    await flushPromises()
+
+    expect(settingsSpy).toHaveBeenCalledWith('mock-token', 'test-account')
+    const sessionSelect = document.body.querySelector(
+      '#device-session-ttl',
+    ) as HTMLSelectElement
+    const accountSelect = document.body.querySelector(
+      '#device-account-ttl',
+    ) as HTMLSelectElement
+    expect(sessionSelect.value).toBe('90')
+    expect(accountSelect.value).toBe('365')
+
+    wrapper.unmount()
+  })
+
+  it('保留时长读取失败时显示默认值 180/540', async () => {
+    vi.spyOn(api, 'getSessionSettings').mockRejectedValue(new Error('boom'))
+
+    const wrapper = mount(DeviceManagerModal, {
+      props: { isOpen: true, accountName: 'test-account' },
+      attachTo: document.body,
+    })
+    await flushPromises()
+
+    const sessionSelect = document.body.querySelector(
+      '#device-session-ttl',
+    ) as HTMLSelectElement
+    const accountSelect = document.body.querySelector(
+      '#device-account-ttl',
+    ) as HTMLSelectElement
+    expect(sessionSelect.value).toBe('180')
+    expect(accountSelect.value).toBe('540')
+    expect(document.body.textContent).toContain(
+      'accounts.sessionSettingsLoadFailed',
+    )
+
+    wrapper.unmount()
+  })
+
+  it('保存会话保留时长时只传该项参数，成功后更新已保存值', async () => {
+    const updateSpy = vi.spyOn(api, 'updateSessionSettings')
+    updateSpy.mockResolvedValue({
+      authorization_ttl_days: 30,
+      account_ttl_days: 540,
+    })
+
+    const wrapper = mount(DeviceManagerModal, {
+      props: { isOpen: true, accountName: 'test-account' },
+      attachTo: document.body,
+    })
+    await flushPromises()
+
+    const sessionSelect = document.body.querySelector(
+      '#device-session-ttl',
+    ) as HTMLSelectElement
+    sessionSelect.value = '30'
+    sessionSelect.dispatchEvent(new Event('change'))
+    await flushPromises()
+
+    const buttons = Array.from(document.body.querySelectorAll('button'))
+    const saveBtn = buttons.find((b) =>
+      (b.textContent || '').includes('accounts.saveSessionTtl'),
+    )
+    expect(saveBtn).toBeDefined()
+    saveBtn!.click()
+    await flushPromises()
+
+    expect(updateSpy).toHaveBeenCalledWith('mock-token', 'test-account', {
+      authorization_ttl_days: 30,
+    })
+    expect(document.body.textContent).toContain('accounts.sessionSettingsSaved')
+
+    wrapper.unmount()
+  })
+
+  it('保存账号保留时长失败时下拉回滚，不改本地值', async () => {
+    // 空 message 的错误走 fallback 文案
+    vi.spyOn(api, 'updateSessionSettings').mockRejectedValue(new Error(''))
+
+    const wrapper = mount(DeviceManagerModal, {
+      props: { isOpen: true, accountName: 'test-account' },
+      attachTo: document.body,
+    })
+    await flushPromises()
+
+    const accountSelect = document.body.querySelector(
+      '#device-account-ttl',
+    ) as HTMLSelectElement
+    expect(accountSelect.value).toBe('540')
+    accountSelect.value = '730'
+    accountSelect.dispatchEvent(new Event('change'))
+    await flushPromises()
+    expect(accountSelect.value).toBe('730')
+
+    const buttons = Array.from(document.body.querySelectorAll('button'))
+    const saveBtn = buttons.find((b) =>
+      (b.textContent || '').includes('accounts.saveAccountTtl'),
+    )
+    saveBtn!.click()
+    await flushPromises()
+
+    // 失败后回滚到服务端确认过的 540
+    expect(accountSelect.value).toBe('540')
+    expect(document.body.textContent).toContain(
+      'accounts.sessionSettingsSaveFailed',
+    )
 
     wrapper.unmount()
   })

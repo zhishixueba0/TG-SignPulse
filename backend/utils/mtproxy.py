@@ -156,7 +156,7 @@ def secret_cache_hash(secret: str) -> str:
 
 async def probe_mtproxy_handshake(
     proxy_dict: dict, timeout: float = 8.0
-) -> tuple[bool, str]:
+) -> tuple[bool, str, Optional[int]]:
     """Prove an MTProxy accepts the handshake, not just the TCP port.
 
     Builds a Kurigram transport for the proxy (transport class picked
@@ -164,42 +164,51 @@ async def probe_mtproxy_handshake(
     TCPAbridged otherwise) and connects it to DC1. After the 64-byte
     obfuscated2 header is sent, a proxy that rejects the secret
     closes the connection right away; we wait briefly for that EOF.
-    Returns (True, "MTProxy handshake OK") only when the connection
-    is still open after the wait, (False, reason) otherwise. Never
-    falls back to direct: this function only ever talks to the proxy.
+    Returns (True, "MTProxy handshake OK", connect_ms) only when the
+    connection is still open after the wait, (False, reason, None)
+    otherwise. ``connect_ms`` is the measured ``transport.connect``
+    time only -- the 2.0s recv confirmation wait validates liveness
+    but is NOT counted as latency. Never falls back to direct: this
+    function only ever talks to the proxy.
     """
+    import time
+
     try:
         from pyrogram.connection.connection import transport_class_for
         from pyrogram.connection.proxy import normalize_proxy
     except Exception as exc:  # pragma: no cover - Kurigram missing
-        return False, f"MTProxy probe unavailable: {exc}"
+        return False, f"MTProxy probe unavailable: {exc}", None
     try:
         mtproxy = normalize_proxy(proxy_dict)
     except Exception as exc:
-        return False, f"MTProxy config invalid: {exc}"
+        return False, f"MTProxy config invalid: {exc}", None
 
     transport = transport_class_for(mtproxy)(proxy=mtproxy, dc_id=1)
     try:
         try:
+            connect_started = time.monotonic()
             await asyncio.wait_for(transport.connect(_DC1_ADDRESS), timeout=timeout)
+            connect_ms = max(int((time.monotonic() - connect_started) * 1000), 0)
         except Exception as exc:
             return (
                 False,
                 f"MTProxy handshake failed: {type(exc).__name__}: {exc}",
+                None,
             )
         try:
             data = await asyncio.wait_for(transport.recv(1), timeout=2.0)
         except asyncio.TimeoutError:
             # Still open after the wait: the proxy accepted the header
             # and is waiting for MTProto packets.
-            return True, "MTProxy handshake OK"
+            return True, "MTProxy handshake OK", connect_ms
         if data is None:
             return (
                 False,
                 "MTProxy closed the connection after the handshake "
                 "(wrong secret or unsupported framing)",
+                None,
             )
-        return True, "MTProxy handshake OK"
+        return True, "MTProxy handshake OK", connect_ms
     finally:
         try:
             await transport.close()

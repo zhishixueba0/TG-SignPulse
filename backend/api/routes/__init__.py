@@ -1,6 +1,7 @@
 from fastapi import APIRouter
 
 from backend.api.routes import (
+    account_tools,
     accounts,
     auth,
     batch,
@@ -23,6 +24,10 @@ router = APIRouter()
 router.include_router(auth.router, prefix="/auth", tags=["auth"])
 router.include_router(user.router, prefix="/user", tags=["user"])
 router.include_router(accounts.router, prefix="/accounts", tags=["accounts"])
+# Fork patch: 账号工具（会话包导出，Drive 1.0.129 account_tools 移植）。
+router.include_router(
+    account_tools.router, prefix="/account-tools", tags=["account-tools"]
+)
 # Fork patch: 聊天中心（对话列表 / 文本消息收发）。Not upstream.
 router.include_router(chats.router, prefix="/chats", tags=["chats"])
 # 旧版 /api/tasks 已移除；请使用 /sign-tasks

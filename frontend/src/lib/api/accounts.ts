@@ -292,6 +292,64 @@ export const exportStandaloneSession = (
     LONG_TIMEOUT_MS,
   );
 
+/** 会话保留时长（Telegram 原生 TTL，服务端执行） */
+export interface SessionSettings {
+  authorization_ttl_days?: number | null;
+  account_ttl_days?: number | null;
+}
+
+export const getSessionSettings = (token: string, accountName: string) =>
+  request<SessionSettings>(
+    `/accounts/${encodeURIComponent(accountName)}/session-settings`,
+    {},
+    token,
+    MEDIUM_TIMEOUT_MS,
+  );
+
+export const updateSessionSettings = (
+  token: string,
+  accountName: string,
+  data: { authorization_ttl_days?: number | null; account_ttl_days?: number | null },
+) =>
+  request<SessionSettings>(
+    `/accounts/${encodeURIComponent(accountName)}/session-settings`,
+    { method: "PUT", body: JSON.stringify(data) },
+    token,
+    MEDIUM_TIMEOUT_MS,
+  );
+
+/**
+ * 导出会话包 ZIP（原样复制当前 auth_key）。面板密码二次确认；
+ * 成功后按服务端 Content-Disposition 文件名下载，失败时抛 ApiError
+ * （detail 为 PANEL_PASSWORD_WRONG / 429 限流等后端错误码原文）。
+ */
+export async function exportSessionPackage(
+  token: string,
+  accountName: string,
+  password: string,
+): Promise<{ filename: string }> {
+  const abort = createRequestAbort(LONG_TIMEOUT_MS, null);
+  try {
+    const res = await fetchWithAuth(
+      `/account-tools/${encodeURIComponent(accountName)}/export-session`,
+      { "Content-Type": "application/json" },
+      { method: "POST", body: JSON.stringify({ password }), signal: abort.signal },
+      token,
+      LONG_TIMEOUT_MS,
+    );
+    const blob = await res.blob();
+    const cd = res.headers.get("Content-Disposition") || "";
+    const match = /filename="?([^"]+)"?/.exec(cd);
+    const filename = match?.[1] || `${accountName}.zip`;
+    downloadBlob(blob, filename);
+    return { filename };
+  } catch (e: unknown) {
+    throw normalizeNetworkError(e, abort);
+  } finally {
+    abort.cleanup();
+  }
+}
+
 export const listAccountOfficialMessages = (token: string, accountName: string, limit = 20) =>
   request<{ messages: OfficialMessageInfo[]; total: number }>(
     `/accounts/${encodeURIComponent(accountName)}/official-messages?limit=${encodeURIComponent(String(limit))}`,

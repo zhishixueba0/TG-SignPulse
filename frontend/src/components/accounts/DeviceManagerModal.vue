@@ -3,11 +3,13 @@ import { computed, onUnmounted, ref, watch } from 'vue'
 import { Check, Copy, Download, LogOut, RefreshCw, ShieldCheck, Trash2 } from 'lucide-vue-next'
 import Modal from '../Modal.vue'
 import {
+  getSessionSettings,
   listAccountDevices,
   listAccountOfficialMessages,
   exportStandaloneSession,
   resetOtherDevices,
   terminateAccountDevice,
+  updateSessionSettings,
   type AccountDeviceInfo,
   type OfficialMessageInfo,
 } from '../../lib/api'
@@ -51,6 +53,90 @@ const exportedSessionString = ref("")
 const exportedDcId = ref<number | null>(null)
 const exportedUserId = ref<number | null>(null)
 const copied = ref(false)
+
+// 保留时长（Telegram 原生 TTL，服务端执行）：演示站下拉值与默认值
+const SESSION_TTL_OPTIONS = [7, 30, 90, 180, 365]
+const ACCOUNT_TTL_OPTIONS = [30, 90, 180, 365, 540, 730]
+const DEFAULT_SESSION_TTL = 180
+const DEFAULT_ACCOUNT_TTL = 540
+const sessionTtl = ref(DEFAULT_SESSION_TTL)
+const accountTtl = ref(DEFAULT_ACCOUNT_TTL)
+// 服务端确认过的值：保存失败时下拉回滚到这里，不改本地值
+const savedSessionTtl = ref(DEFAULT_SESSION_TTL)
+const savedAccountTtl = ref(DEFAULT_ACCOUNT_TTL)
+const ttlLoading = ref(false)
+const ttlError = ref('')
+const ttlSaving = ref<'session' | 'account' | null>(null)
+const ttlSaved = ref<'session' | 'account' | null>(null)
+
+const loadSessionSettings = async () => {
+  const token = getAuthToken()
+  if (!token || !props.accountName) return
+  ttlLoading.value = true
+  ttlError.value = ''
+  try {
+    const res = await getSessionSettings(token, props.accountName)
+    const nextSession = res.authorization_ttl_days ?? DEFAULT_SESSION_TTL
+    const nextAccount = res.account_ttl_days ?? DEFAULT_ACCOUNT_TTL
+    sessionTtl.value = nextSession
+    accountTtl.value = nextAccount
+    savedSessionTtl.value = nextSession
+    savedAccountTtl.value = nextAccount
+  } catch {
+    // 读不到就显示默认值，不遮断设备列表
+    sessionTtl.value = DEFAULT_SESSION_TTL
+    accountTtl.value = DEFAULT_ACCOUNT_TTL
+    savedSessionTtl.value = DEFAULT_SESSION_TTL
+    savedAccountTtl.value = DEFAULT_ACCOUNT_TTL
+    ttlError.value = t('accounts.sessionSettingsLoadFailed')
+  } finally {
+    ttlLoading.value = false
+  }
+}
+
+const saveSessionTtl = async () => {
+  const token = getAuthToken()
+  if (!token || !props.accountName || ttlSaving.value) return
+  ttlSaving.value = 'session'
+  ttlError.value = ''
+  ttlSaved.value = null
+  try {
+    const res = await updateSessionSettings(token, props.accountName, {
+      authorization_ttl_days: sessionTtl.value,
+    })
+    const confirmed = res.authorization_ttl_days ?? sessionTtl.value
+    sessionTtl.value = confirmed
+    savedSessionTtl.value = confirmed
+    ttlSaved.value = 'session'
+  } catch (e: unknown) {
+    sessionTtl.value = savedSessionTtl.value
+    ttlError.value = getLocalizedErrorMessage(e, t, t('accounts.sessionSettingsSaveFailed'))
+  } finally {
+    ttlSaving.value = null
+  }
+}
+
+const saveAccountTtl = async () => {
+  const token = getAuthToken()
+  if (!token || !props.accountName || ttlSaving.value) return
+  ttlSaving.value = 'account'
+  ttlError.value = ''
+  ttlSaved.value = null
+  try {
+    const res = await updateSessionSettings(token, props.accountName, {
+      account_ttl_days: accountTtl.value,
+    })
+    const confirmed = res.account_ttl_days ?? accountTtl.value
+    accountTtl.value = confirmed
+    savedAccountTtl.value = confirmed
+    ttlSaved.value = 'account'
+  } catch (e: unknown) {
+    accountTtl.value = savedAccountTtl.value
+    ttlError.value = getLocalizedErrorMessage(e, t, t('accounts.sessionSettingsSaveFailed'))
+  } finally {
+    ttlSaving.value = null
+  }
+}
 
 const handleExportSession = async () => {
   const ok = await confirm({
@@ -171,7 +257,7 @@ const loadOfficialMessages = async () => {
 }
 
 const refreshAll = async () => {
-  await Promise.all([loadDevices(), loadOfficialMessages()])
+  await Promise.all([loadDevices(), loadOfficialMessages(), loadSessionSettings()])
 }
 
 const handleTerminate = async (device: AccountDeviceInfo) => {
@@ -241,6 +327,13 @@ watch(
       error.value = ''
       successMessage.value = ''
       terminatingHash.value = ''
+      ttlError.value = ''
+      ttlSaved.value = null
+      ttlSaving.value = null
+      sessionTtl.value = DEFAULT_SESSION_TTL
+      accountTtl.value = DEFAULT_ACCOUNT_TTL
+      savedSessionTtl.value = DEFAULT_SESSION_TTL
+      savedAccountTtl.value = DEFAULT_ACCOUNT_TTL
       exportedModalOpen.value = false
       exportedSessionString.value = ''
       copied.value = false
@@ -408,6 +501,78 @@ onUnmounted(() => {
                   </button>
                 </div>
               </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 保留时长（Telegram 原生 TTL，服务端执行） -->
+        <div>
+          <div class="flex items-center justify-between mb-2">
+            <h4 class="text-xs font-semibold text-[var(--sp-text-secondary)] dark:text-[var(--sp-text-secondary)]">
+              {{ t('accounts.sessionRetentionTitle') }}
+            </h4>
+          </div>
+          <p class="text-[11px] text-[var(--sp-text-muted)] leading-relaxed mb-2">
+            {{ t('accounts.sessionRetentionHint') }}
+          </p>
+          <div
+            v-if="ttlError"
+            class="text-xs text-red-600 bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-900 rounded-[var(--sp-radius-lg)] p-3 mb-2"
+          >
+            {{ ttlError }}
+          </div>
+          <div
+            v-if="ttlSaved"
+            class="text-xs text-emerald-600 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-900 rounded-[var(--sp-radius-lg)] p-3 mb-2"
+          >
+            {{ t('accounts.sessionSettingsSaved') }}
+          </div>
+          <div class="space-y-2">
+            <div class="flex items-center gap-2">
+              <label class="text-xs text-[var(--sp-text-secondary)] w-24 shrink-0" for="device-session-ttl">
+                {{ t('accounts.authorizationTtlLabel') }}
+              </label>
+              <select
+                id="device-session-ttl"
+                v-model.number="sessionTtl"
+                class="ui-input !w-32 !py-1.5 !text-xs"
+                :disabled="ttlLoading || ttlSaving !== null"
+              >
+                <option v-for="days in SESSION_TTL_OPTIONS" :key="days" :value="days">
+                  {{ t('accounts.ttlDays', { days }) }}
+                </option>
+              </select>
+              <button
+                type="button"
+                class="ui-btn-secondary !px-3 !py-1.5 !text-xs"
+                :disabled="ttlLoading || ttlSaving !== null"
+                @click="saveSessionTtl"
+              >
+                {{ ttlSaving === 'session' ? t('accounts.sessionSettingsSaving') : t('accounts.saveSessionTtl') }}
+              </button>
+            </div>
+            <div class="flex items-center gap-2">
+              <label class="text-xs text-[var(--sp-text-secondary)] w-24 shrink-0" for="device-account-ttl">
+                {{ t('accounts.accountTtlLabel') }}
+              </label>
+              <select
+                id="device-account-ttl"
+                v-model.number="accountTtl"
+                class="ui-input !w-32 !py-1.5 !text-xs"
+                :disabled="ttlLoading || ttlSaving !== null"
+              >
+                <option v-for="days in ACCOUNT_TTL_OPTIONS" :key="days" :value="days">
+                  {{ t('accounts.ttlDays', { days }) }}
+                </option>
+              </select>
+              <button
+                type="button"
+                class="ui-btn-secondary !px-3 !py-1.5 !text-xs"
+                :disabled="ttlLoading || ttlSaving !== null"
+                @click="saveAccountTtl"
+              >
+                {{ ttlSaving === 'account' ? t('accounts.sessionSettingsSaving') : t('accounts.saveAccountTtl') }}
+              </button>
             </div>
           </div>
         </div>

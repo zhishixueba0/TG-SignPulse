@@ -20,6 +20,8 @@ import AddAccountModal from '../components/accounts/AddAccountModal.vue'
 import EditAccountModal from '../components/accounts/EditAccountModal.vue'
 import DeviceManagerModal from '../components/accounts/DeviceManagerModal.vue'
 import OfficialMessagesModal from '../components/accounts/OfficialMessagesModal.vue'
+import SessionExportModal from '../components/accounts/SessionExportModal.vue'
+import SessionPackageModal from '../components/accounts/SessionPackageModal.vue'
 import PageRetry from '../components/PageRetry.vue'
 import FilterEmptyState from '../components/FilterEmptyState.vue'
 import { devLog } from '../lib/devLog'
@@ -407,10 +409,22 @@ const openTagsModal = (acc: AccountUiItem, mode: 'append' | 'edit') => {
   showTagsModal.value = true
 }
 
-/** 导出会话包：复用设备弹窗里的独立 Session 导出入口（同一份实现，不另起一套） */
+/** 导出会话包（直接复制当前 auth_key 的 ZIP）：密码确认弹窗直达下载 */
+const showPackageModal = ref(false)
+const packageAccountName = ref('')
 const handleExportSession = (acc: AccountUiItem) => {
   closeMenu()
-  openDevices(acc.name)
+  packageAccountName.value = acc.name
+  showPackageModal.value = true
+}
+
+/** 派生独立会话（ExportLoginToken 全新设备）：专用步骤弹窗 */
+const showDeriveModal = ref(false)
+const deriveAccountName = ref('')
+const handleDeriveSession = (acc: AccountUiItem) => {
+  closeMenu()
+  deriveAccountName.value = acc.name
+  showDeriveModal.value = true
 }
 </script>
 
@@ -741,6 +755,7 @@ const handleExportSession = (acc: AccountUiItem) => {
                 <button type="button" role="menuitem" class="ui-menu-item" @click="handlePauseToggle(acc)">{{ acc.raw.paused ? t('accounts.resumeAccount') : t('accounts.pauseAccount') }}</button>
                 <button type="button" role="menuitem" class="ui-menu-item" @click="openEdit(acc)">{{ t('accounts.nameRemarkProxy') }}</button>
                 <button type="button" role="menuitem" class="ui-menu-item" @click="handleExportSession(acc)">{{ t('accounts.exportSessionPackage') }}</button>
+                <button type="button" role="menuitem" class="ui-menu-item" @click="handleDeriveSession(acc)">{{ t('accounts.deriveStandaloneSession') }}</button>
                 <button type="button" role="menuitem" class="ui-menu-item" @click="goLogs(acc.name)">{{ t('accounts.runLogs') }}</button>
                 <button type="button" role="menuitem" class="ui-menu-item" @click="openDevices(acc.name)">{{ t('accounts.devicesAndSessions') }}</button>
                 <button type="button" role="menuitem" class="ui-menu-item" @click="openOfficialMessages(acc.name)">{{ t('accounts.officialMessages') }}</button>
@@ -808,6 +823,7 @@ const handleExportSession = (acc: AccountUiItem) => {
               <button type="button" role="menuitem" class="ui-menu-item" @click="handlePauseToggle(acc)">{{ acc.raw.paused ? t('accounts.resumeAccount') : t('accounts.pauseAccount') }}</button>
               <button type="button" role="menuitem" class="ui-menu-item" @click="openEdit(acc)">{{ t('accounts.nameRemarkProxy') }}</button>
               <button type="button" role="menuitem" class="ui-menu-item" @click="handleExportSession(acc)">{{ t('accounts.exportSessionPackage') }}</button>
+              <button type="button" role="menuitem" class="ui-menu-item" @click="handleDeriveSession(acc)">{{ t('accounts.deriveStandaloneSession') }}</button>
               <button type="button" role="menuitem" class="ui-menu-item" @click="goLogs(acc.name)">{{ t('accounts.runLogs') }}</button>
               <button type="button" role="menuitem" class="ui-menu-item" @click="openDevices(acc.name)">{{ t('accounts.devicesAndSessions') }}</button>
               <button type="button" role="menuitem" class="ui-menu-item" @click="openOfficialMessages(acc.name)">{{ t('accounts.officialMessages') }}</button>
@@ -933,6 +949,8 @@ const handleExportSession = (acc: AccountUiItem) => {
     <AddAccountModal :isOpen="showAddModal" :initialMethod="initialMethod" :initialAccountName="initialAccountName" @close="showAddModal = false" @success="loadAccounts" />
     <EditAccountModal v-if="editingAccount" :isOpen="showEditModal" :account="editingAccount" @close="showEditModal = false" @closed="onEditModalClosed" @success="loadAccounts" @relogin="handleRelogin" />
     <DeviceManagerModal :isOpen="showDeviceModal" :accountName="deviceAccountName" @close="showDeviceModal = false" />
+    <SessionPackageModal :isOpen="showPackageModal" :accountName="packageAccountName" @close="showPackageModal = false" />
+    <SessionExportModal :isOpen="showDeriveModal" :accountName="deriveAccountName" @close="showDeriveModal = false" />
     <OfficialMessagesModal :isOpen="showOfficialMessagesModal" :accountName="officialMessagesAccountName" @close="showOfficialMessagesModal = false" />
   </div>
 </template>

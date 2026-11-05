@@ -18,6 +18,13 @@ settings = get_settings()
 
 logger = logging.getLogger("backend.telegram.devices")
 
+# 会话保留时长（Telegram 原生 TTL，Drive 1.0.129 session_tools 同款）：
+# authorization_ttl_days = 闲置会话在服务端保留天数，到期自动终止；
+# account_ttl_days = 账号闲置天数，到期账号自动删除。面板只负责设置与
+# 读取，执行在 Telegram 服务端，不设每日定时删除任务。
+AUTHORIZATION_TTL_RANGE = (7, 365)
+ACCOUNT_TTL_RANGE = (30, 730)
+
 
 class TelegramDevicesMixin:
     async def verify_account_proxy(
@@ -190,6 +197,124 @@ class TelegramDevicesMixin:
                     "FRESH_RESET_AUTHORISATION_FORBIDDEN: 新登录会话在初始保护期内无法重置其他设备，请在几小时后再试"
                 ) from e
             raise
+
+    async def get_session_settings(
+        self,
+        account_name: str,
+        timeout_seconds: float = 20.0,
+    ) -> Dict[str, Any]:
+        """读取账号的 Telegram 原生保留时长（GetAuthorizations + GetAccountTTL）。
+
+        返回 {"authorization_ttl_days": int|None, "account_ttl_days": int|None}。
+        """
+        from pyrogram import raw
+
+        account_name = self._normalize_account_name(account_name)
+        if not self.account_exists(account_name):
+            raise ValueError("账号不存在")
+
+        client, proxy_dict = self._build_account_client(account_name, no_updates=True)
+        await self.verify_account_proxy(account_name, proxy_dict)
+
+        timeout_seconds = max(1.0, min(float(timeout_seconds or 20.0), 30.0))
+        try:
+            async with acquire_account_lock_with_timeout(
+                account_name, timeout=timeout_seconds
+            ):
+                async with client:
+                    authorizations = await asyncio.wait_for(
+                        client.invoke(raw.functions.account.GetAuthorizations()),
+                        timeout=timeout_seconds,
+                    )
+                    account_ttl = await asyncio.wait_for(
+                        client.invoke(raw.functions.account.GetAccountTTL()),
+                        timeout=timeout_seconds,
+                    )
+        except AccountLockTimeout as e:
+            logger.warning("读取会话保留时长获取锁超时 %s: %s", account_name, e)
+            raise AccountLockTimeout("ACCOUNT_BUSY") from e
+
+        authorization_ttl_days = getattr(authorizations, "authorization_ttl_days", None)
+        account_ttl_days = getattr(account_ttl, "days", None)
+        return {
+            "authorization_ttl_days": (
+                int(authorization_ttl_days)
+                if authorization_ttl_days is not None
+                else None
+            ),
+            "account_ttl_days": (
+                int(account_ttl_days) if account_ttl_days is not None else None
+            ),
+        }
+
+    async def set_session_settings(
+        self,
+        account_name: str,
+        *,
+        authorization_ttl_days: Optional[int] = None,
+        account_ttl_days: Optional[int] = None,
+        timeout_seconds: float = 20.0,
+    ) -> Dict[str, Any]:
+        """设置账号的 Telegram 原生保留时长并重读返回。
+
+        两项都空 → SESSION_SETTINGS_EMPTY；超范围 → *_TTL_INVALID。
+        SetAuthorizationTTL / SetAccountTTL 由 Telegram 服务端执行，
+        面板不做定时删除。
+        """
+        from pyrogram import raw
+
+        if authorization_ttl_days is None and account_ttl_days is None:
+            raise ValueError("SESSION_SETTINGS_EMPTY")
+        if authorization_ttl_days is not None:
+            low, high = AUTHORIZATION_TTL_RANGE
+            if not low <= int(authorization_ttl_days) <= high:
+                raise ValueError("AUTHORIZATION_TTL_INVALID")
+        if account_ttl_days is not None:
+            low, high = ACCOUNT_TTL_RANGE
+            if not low <= int(account_ttl_days) <= high:
+                raise ValueError("ACCOUNT_TTL_INVALID")
+
+        account_name = self._normalize_account_name(account_name)
+        if not self.account_exists(account_name):
+            raise ValueError("账号不存在")
+
+        client, proxy_dict = self._build_account_client(account_name, no_updates=True)
+        await self.verify_account_proxy(account_name, proxy_dict)
+
+        timeout_seconds = max(1.0, min(float(timeout_seconds or 20.0), 30.0))
+        try:
+            async with acquire_account_lock_with_timeout(
+                account_name, timeout=timeout_seconds
+            ):
+                async with client:
+                    if authorization_ttl_days is not None:
+                        await asyncio.wait_for(
+                            client.invoke(
+                                raw.functions.account.SetAuthorizationTTL(
+                                    authorization_ttl_days=int(authorization_ttl_days)
+                                )
+                            ),
+                            timeout=timeout_seconds,
+                        )
+                    if account_ttl_days is not None:
+                        await asyncio.wait_for(
+                            client.invoke(
+                                raw.functions.account.SetAccountTTL(
+                                    ttl=raw.types.AccountDaysTTL(
+                                        days=int(account_ttl_days)
+                                    )
+                                )
+                            ),
+                            timeout=timeout_seconds,
+                        )
+        except AccountLockTimeout as e:
+            logger.warning("设置会话保留时长获取锁超时 %s: %s", account_name, e)
+            raise AccountLockTimeout("ACCOUNT_BUSY") from e
+
+        # 写完重读一次返回（1.0.129 同款）
+        return await self.get_session_settings(
+            account_name, timeout_seconds=timeout_seconds
+        )
 
     async def list_official_messages(
         self,

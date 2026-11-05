@@ -30,7 +30,7 @@ from backend.utils.account_locks import (
 )
 from backend.utils.names import validate_storage_name
 from backend.utils.proxy import build_proxy_dict
-from backend.utils.tg_session import get_account_profile
+from backend.utils.tg_session import get_account_profile, get_account_session_identity
 
 logger = logging.getLogger("backend.telegram.session_exporter")
 
@@ -178,6 +178,32 @@ async def create_standalone_session_export(
         await candidate_client.connect()
         candidate_client.is_connected = True
 
+        # Step 3b: 接受前先到账号的 DC。未登录的候选默认在 DC2 取 token，
+        # 而主账号可能在 DC1：Accept 成功后轮询会在 DC2 收到
+        # LoginTokenMigrateTo(dc=1)，此时再迁移会丢弃已接受 token 所属
+        # 的 auth key（EXPORT_LOGIN_TIMEOUT 根因）。先迁到账号 DC，
+        # 首次 token 就是该 DC 的 token，Accept 后轮询直接出 Success。
+        account_dc = None
+        try:
+            identity = get_account_session_identity(account_name)
+            if identity:
+                account_dc = identity.get("dc_id")
+        except Exception as exc:
+            logger.debug("读取账号 DC 失败 %s: %s", account_name, exc)
+        if account_dc:
+            candidate_dc = None
+            try:
+                candidate_dc = await candidate_client.storage.dc_id()
+            except Exception as exc:
+                logger.debug("读取候选 DC 失败: %s", exc)
+            if candidate_dc != account_dc:
+                logger.info(
+                    "候选客户端先迁移到账号 DC %s（当前 DC %s）",
+                    account_dc,
+                    candidate_dc,
+                )
+                await _migrate_candidate_dc(candidate_client, int(account_dc))
+
         # Step 4: Export initial login token
         export_result = await candidate_client.invoke(
             raw.functions.auth.ExportLoginToken(
@@ -198,6 +224,14 @@ async def create_standalone_session_export(
                 )
             )
 
+        if isinstance(export_result, raw.types.auth.LoginTokenMigrateTo):
+            # 3 次迁移后仍需迁移：MigrateTo 自带的 token 不保证可直接
+            # 接受，继续 Accept 是隐患，明确失败而不是继续。
+            return SessionExportResult(
+                success=False,
+                error="EXPORT_TOKEN_FAILED: DC 迁移 3 次后仍需迁移，导出中止",
+            )
+
         token_bytes = getattr(export_result, "token", None)
         if not token_bytes:
             return SessionExportResult(
@@ -206,11 +240,16 @@ async def create_standalone_session_export(
             )
 
         # Step 5: Main account accepts login token under account lock
+        # 凭据统一：主客户端用与候选同一份解析后的 API 凭据（env > 配置），
+        # 不再一头走配置、一头回落默认 611335。
         candidate_auth_hash = None
         try:
             async with acquire_account_lock_with_timeout(account_name, timeout=15.0):
                 main_client, _ = service._build_account_client(
-                    account_name, no_updates=True
+                    account_name,
+                    no_updates=True,
+                    api_id=api_id,
+                    api_hash=api_hash,
                 )
                 # 主客户端由引用计数共享，连接必须锁内进出上下文：出栈即断开，
                 # 避免锁释放后仍持有连接（异常路径会泄漏，也可能被误停）
@@ -220,6 +259,11 @@ async def create_standalone_session_export(
                     )
                     candidate_auth_hash = getattr(accept_res, "hash", None) or getattr(
                         getattr(accept_res, "authorization", None), "hash", None
+                    )
+                    logger.info(
+                        "AcceptLoginToken 成功 account=%s dc=%s",
+                        account_name,
+                        account_dc,
                     )
         except AccountLockTimeout as exc:
             logger.warning(
@@ -242,24 +286,35 @@ async def create_standalone_session_export(
                 error=f"ACCEPT_LOGIN_TOKEN_FAILED: {exc}",
             )
 
-        async def _rollback_candidate_auth() -> None:
-            """撤销候选授权：ResetAuthorization 需在账号锁内操作主账号客户端。"""
+        async def _rollback_candidate_auth() -> Optional[str]:
+            """撤销候选授权：ResetAuthorization 需在账号锁内操作主账号客户端。
+
+            返回 None 表示已撤销（或无需撤销），否则返回失败原因摘要。
+            406 FRESH_RESET_AUTHORISATION_FORBIDDEN 表示当前会话登录不
+            足 24h、不可清退其他会话：已接受的授权会残留，须 24h 后清退。
+            """
             reset_auth_cls = getattr(raw.functions.account, "ResetAuthorization", None)
             if not reset_auth_cls or not candidate_auth_hash:
-                return
+                return None
             try:
                 async with acquire_account_lock_with_timeout(
                     account_name, timeout=15.0
                 ):
                     rollback_client, _ = service._build_account_client(
-                        account_name, no_updates=True
+                        account_name,
+                        no_updates=True,
+                        api_id=api_id,
+                        api_hash=api_hash,
                     )
                     async with rollback_client:
                         await rollback_client.invoke(
                             reset_auth_cls(hash=candidate_auth_hash)
                         )
+                return None
             except Exception as exc:
+                reason = str(exc)
                 logger.warning("撤销候选授权失败: %s", exc)
+                return reason
 
         # Step 6: Candidate client polls for LoginTokenSuccess
         poll_start = time.monotonic()
@@ -267,6 +322,7 @@ async def create_standalone_session_export(
         success_result = None
 
         while time.monotonic() < poll_deadline:
+            remaining = max(0.0, poll_deadline - time.monotonic())
             try:
                 check_result = await candidate_client.invoke(
                     raw.functions.auth.ExportLoginToken(
@@ -285,19 +341,50 @@ async def create_standalone_session_export(
                 continue
 
             if isinstance(check_result, raw.types.auth.LoginTokenSuccess):
+                logger.info(
+                    "轮询到 LoginTokenSuccess account=%s 剩余 %.0fs",
+                    account_name,
+                    remaining,
+                )
                 success_result = check_result
                 break
             elif isinstance(check_result, raw.types.auth.LoginTokenMigrateTo):
-                await _migrate_candidate_dc(candidate_client, check_result.dc_id)
+                # 接受后禁迁移：token 与发起它的 auth key 绑定，换新 key
+                # 迁移会丢弃已接受的 token，轮询将永远等不到 Success。
+                # 明确失败（或整个流程在正确 DC 上重做），绝不在此迁移。
+                logger.warning(
+                    "接受后轮询收到 LoginTokenMigrateTo(dc=%s)，不再迁移，导出失败",
+                    check_result.dc_id,
+                )
+                await _rollback_candidate_auth()
+                return SessionExportResult(
+                    success=False,
+                    error=(
+                        "EXPORT_LOGIN_DC_MISMATCH: 授权已在 DC"
+                        f"{check_result.dc_id} 创建，候选须在该 DC 重新导出"
+                    ),
+                )
+            else:
+                logger.debug(
+                    "轮询 ExportLoginToken account=%s 结果=LoginToken 剩余 %.0fs",
+                    account_name,
+                    remaining,
+                )
 
             await asyncio.sleep(1.0)
 
         if success_result is None:
-            await _rollback_candidate_auth()
-            return SessionExportResult(
-                success=False,
-                error="EXPORT_LOGIN_TIMEOUT: Timeout waiting for candidate authorization",
-            )
+            rollback_reason = await _rollback_candidate_auth()
+            error = "EXPORT_LOGIN_TIMEOUT: Timeout waiting for candidate authorization"
+            if rollback_reason and (
+                "FRESH_RESET_AUTHORISATION_FORBIDDEN" in rollback_reason
+                or "406" in rollback_reason
+            ):
+                error += (
+                    "（已接受的授权未撤销：当前会话登录不足 24h，"
+                    "24h 后可在设备管理中清退）"
+                )
+            return SessionExportResult(success=False, error=error)
 
         # Step 7: Authorize candidate client storage
         auth_user = getattr(success_result.authorization, "user", None)

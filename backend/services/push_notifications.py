@@ -611,6 +611,48 @@ async def send_outbox_telegram_message(
     return state
 
 
+async def send_session_export_notification(
+    settings: Dict[str, Any],
+    *,
+    account_name: str,
+    username: str,
+) -> None:
+    """会话包导出后的 Bot 提醒（Drive 1.0.129 ``notify_export`` 文案）。
+
+    导出的包是完整登录态：提醒本人核对，若非本人操作立即去
+    「设备与会话」清退其他设备。通知失败只记日志，不阻塞导出响应。
+    """
+    if not settings.get("telegram_bot_notify_enabled"):
+        return
+    if is_in_quiet_hours(settings):
+        return
+
+    bot_token, chat_id, thread_id = _bot_config(settings)
+    if not bot_token or not chat_id:
+        logger.warning("Telegram 会话导出通知未配置")
+        return
+
+    text = build_html_notification(
+        title="🔑 账号会话包被导出",
+        fields=[
+            ("时间 (UTC)", utc_now_iso_z_seconds()),
+            ("账号", account_name),
+            ("操作人", username or ""),
+        ],
+        footer="如果不是你本人操作，请立刻到账号管理「设备与会话」里退出其他设备。",
+    )
+    try:
+        await send_telegram_bot_message(
+            bot_token=bot_token,
+            chat_id=chat_id,
+            text=text,
+            message_thread_id=thread_id,
+            parse_mode="HTML",
+        )
+    except Exception as exc:
+        logger.warning("Telegram 会话导出通知发送失败: %s", sanitize_push_error(exc))
+
+
 async def send_task_success_notification(
     settings: Dict[str, Any],
     *,

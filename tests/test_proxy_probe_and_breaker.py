@@ -5,6 +5,10 @@ import pytest
 
 from backend.core.config import get_settings
 from backend.services.config import ConfigService
+from backend.services.proxy_circuit_breaker import (
+    CircuitState,
+    get_proxy_circuit_breaker,
+)
 from backend.services.telegram.accounts import TelegramAccountsMixin
 from backend.utils.proxy import (
     DEFAULT_PROBE_ENDPOINTS,
@@ -12,7 +16,17 @@ from backend.utils.proxy import (
     clear_proxy_probe_cache,
     probe_proxy_exit,
 )
+from backend.utils.proxy_handshake import HandshakeResult
 from backend.utils.tg_session import _account_store_cache, set_account_profile
+
+
+def _handshake_ok():
+    """Mock the Telegram handshake screen as passed (3ms)."""
+    from unittest.mock import AsyncMock
+
+    return AsyncMock(
+        return_value=HandshakeResult(ok=True, code="OK", message="OK", latency_ms=3)
+    )
 
 
 @pytest.fixture(autouse=True)
@@ -85,17 +99,23 @@ async def test_probe_proxy_failed_when_exit_matches_host_ip(tmp_path, monkeypatc
 
     host_ip = "198.51.100.42"
 
-    # probe_proxy_exit 直接调用验证
+    # probe_proxy_exit 直接调用验证（握手快筛 mock 为通过，出口 IP 走新版
+    # _fetch_ip_via_proxy_detailed；两端点并行，各调一次）
     with (
         patch(
-            "backend.utils.proxy._fetch_ip_via_proxy", new_callable=AsyncMock
+            "backend.utils.proxy._fetch_ip_via_proxy_detailed",
+            new_callable=AsyncMock,
         ) as mock_proxy_ip,
         patch(
             "backend.utils.proxy.get_host_direct_ip", new_callable=AsyncMock
         ) as mock_host_ip,
+        patch(
+            "backend.utils.proxy.probe_telegram_handshake",
+            new=_handshake_ok(),
+        ),
     ):
         mock_host_ip.return_value = host_ip
-        mock_proxy_ip.return_value = host_ip  # 泄漏：出口 IP 与宿主机一致
+        mock_proxy_ip.return_value = (host_ip, None)  # 泄漏：出口 IP 与宿主机一致
 
         status, ip = await probe_proxy_exit(proxy_dict)
         assert status == ProxyProbeStatus.FAILED
@@ -189,30 +209,43 @@ async def test_probe_proxy_unavailable_warn_policy_allows(tmp_path, monkeypatch)
 
 @pytest.mark.asyncio
 async def test_probe_proxy_cached_within_ttl():
-    """验证相同代理探测结果在 600s TTL 内直接复用缓存，不重复发网络请求。"""
+    """验证相同代理探测结果在 600s TTL 内直接复用缓存，不重复发网络请求。
+
+    缓存命中时 latency_ms 为 None（绝不把 0ms 当实测延迟），cached 为 True。
+    """
     proxy_dict = {"scheme": "socks5", "hostname": "10.0.0.1", "port": 1080}
 
     with (
         patch(
-            "backend.utils.proxy._fetch_ip_via_proxy", new_callable=AsyncMock
+            "backend.utils.proxy._fetch_ip_via_proxy_detailed",
+            new_callable=AsyncMock,
         ) as mock_proxy_ip,
         patch(
             "backend.utils.proxy.get_host_direct_ip", new_callable=AsyncMock
         ) as mock_host_ip,
+        patch(
+            "backend.utils.proxy.probe_telegram_handshake",
+            new=_handshake_ok(),
+        ),
     ):
         mock_host_ip.return_value = "1.1.1.1"
-        mock_proxy_ip.return_value = "2.2.2.2"
+        mock_proxy_ip.return_value = ("2.2.2.2", None)
 
-        status1, ip1 = await probe_proxy_exit(proxy_dict)
-        assert status1 == ProxyProbeStatus.OK
-        assert ip1 == "2.2.2.2"
-        assert mock_proxy_ip.call_count == 1
+        outcome1 = await probe_proxy_exit(proxy_dict)
+        assert outcome1.status == ProxyProbeStatus.OK
+        assert outcome1.detail == "2.2.2.2"
+        assert outcome1.cached is False
+        assert outcome1.latency_ms is not None and outcome1.latency_ms >= 0
+        # 两端点并行，各调一次
+        assert mock_proxy_ip.call_count == len(DEFAULT_PROBE_ENDPOINTS)
 
         # 第二次探测相同代理：命中缓存
-        status2, ip2 = await probe_proxy_exit(proxy_dict)
-        assert status2 == ProxyProbeStatus.OK
-        assert ip2 == "2.2.2.2"
-        assert mock_proxy_ip.call_count == 1  # 依然是 1，未重复调用
+        outcome2 = await probe_proxy_exit(proxy_dict)
+        assert outcome2.status == ProxyProbeStatus.OK
+        assert outcome2.detail == "2.2.2.2"
+        assert outcome2.cached is True
+        assert outcome2.latency_ms is None
+        assert mock_proxy_ip.call_count == len(DEFAULT_PROBE_ENDPOINTS)  # 未重复调用
 
 
 @pytest.mark.asyncio
@@ -222,14 +255,19 @@ async def test_probe_proxy_unavailable_is_cached():
 
     with (
         patch(
-            "backend.utils.proxy._fetch_ip_via_proxy", new_callable=AsyncMock
+            "backend.utils.proxy._fetch_ip_via_proxy_detailed",
+            new_callable=AsyncMock,
         ) as mock_proxy_ip,
         patch(
             "backend.utils.proxy.get_host_direct_ip", new_callable=AsyncMock
         ) as mock_host_ip,
+        patch(
+            "backend.utils.proxy.probe_telegram_handshake",
+            new=_handshake_ok(),
+        ),
     ):
         mock_host_ip.return_value = "1.1.1.1"
-        mock_proxy_ip.return_value = None  # 两个端点均不可达
+        mock_proxy_ip.return_value = (None, "ConnectTimeout: timed out")
 
         status1, _ = await probe_proxy_exit(proxy_dict)
         assert status1 == ProxyProbeStatus.UNAVAILABLE
@@ -239,6 +277,213 @@ async def test_probe_proxy_unavailable_is_cached():
         assert status2 == ProxyProbeStatus.UNAVAILABLE
         # 命中缓存：不再重复探测
         assert mock_proxy_ip.call_count == len(DEFAULT_PROBE_ENDPOINTS)
+
+
+@pytest.mark.asyncio
+async def test_probe_force_bypasses_cache_with_real_latency():
+    """force=True 跳过缓存读，连续两次都走真实网络，延迟为实测值非缓存值。"""
+    proxy_dict = {"scheme": "socks5", "hostname": "10.0.0.3", "port": 1080}
+
+    with (
+        patch(
+            "backend.utils.proxy._fetch_ip_via_proxy_detailed",
+            new_callable=AsyncMock,
+        ) as mock_proxy_ip,
+        patch(
+            "backend.utils.proxy.get_host_direct_ip", new_callable=AsyncMock
+        ) as mock_host_ip,
+        patch(
+            "backend.utils.proxy.probe_telegram_handshake",
+            new=_handshake_ok(),
+        ),
+    ):
+        mock_host_ip.return_value = "1.1.1.1"
+        mock_proxy_ip.return_value = ("2.2.2.2", None)
+
+        first = await probe_proxy_exit(proxy_dict)
+        assert first.status == ProxyProbeStatus.OK
+        assert first.cached is False
+
+        second = await probe_proxy_exit(proxy_dict, force=True)
+        assert second.status == ProxyProbeStatus.OK
+        assert second.cached is False
+        assert second.latency_ms is not None and second.latency_ms >= 0
+        # 两次真实探测 × 两端点
+        assert mock_proxy_ip.call_count == 2 * len(DEFAULT_PROBE_ENDPOINTS)
+
+        # 不带 force 时命中缓存
+        third = await probe_proxy_exit(proxy_dict)
+        assert third.cached is True
+        assert third.latency_ms is None
+        assert mock_proxy_ip.call_count == 2 * len(DEFAULT_PROBE_ENDPOINTS)
+
+
+@pytest.mark.asyncio
+async def test_probe_http_plaintext_fallback():
+    """http 代理 https 端点 CONNECT 全灭、明文 http 端点成功时判 OK。"""
+    proxy_dict = {"scheme": "http", "hostname": "10.0.0.4", "port": 8080}
+
+    async def fake_fetch(proxy_dict_arg, endpoint, timeout=5.0):
+        if endpoint.startswith("https://"):
+            return None, "ProxyError: CONNECT refused"
+        return "203.0.113.9", None
+
+    with (
+        patch(
+            "backend.utils.proxy._fetch_ip_via_proxy_detailed",
+            new_callable=AsyncMock,
+        ) as mock_proxy_ip,
+        patch(
+            "backend.utils.proxy.get_host_direct_ip", new_callable=AsyncMock
+        ) as mock_host_ip,
+        patch(
+            "backend.utils.proxy.probe_telegram_handshake",
+            new=_handshake_ok(),
+        ),
+    ):
+        mock_host_ip.return_value = "1.1.1.1"
+        mock_proxy_ip.side_effect = fake_fetch
+
+        outcome = await probe_proxy_exit(proxy_dict)
+        assert outcome.status == ProxyProbeStatus.OK
+        assert outcome.detail == "203.0.113.9"
+        # https 2 次 + 明文 2 次
+        assert mock_proxy_ip.call_count == 4
+
+
+@pytest.mark.asyncio
+async def test_probe_failure_detail_carries_real_error():
+    """失败 detail 带真实错误摘要，而非恒定的 Connection timed out。"""
+    proxy_dict = {"scheme": "socks5", "hostname": "10.0.0.5", "port": 1080}
+
+    with (
+        patch(
+            "backend.utils.proxy._fetch_ip_via_proxy_detailed",
+            new_callable=AsyncMock,
+        ) as mock_proxy_ip,
+        patch(
+            "backend.utils.proxy.get_host_direct_ip", new_callable=AsyncMock
+        ) as mock_host_ip,
+        patch(
+            "backend.utils.proxy.probe_telegram_handshake",
+            new=_handshake_ok(),
+        ),
+    ):
+        mock_host_ip.return_value = "1.1.1.1"
+        mock_proxy_ip.return_value = (
+            None,
+            "ProxyError: 407 Proxy Authentication Required",
+        )
+
+        outcome = await probe_proxy_exit(proxy_dict)
+        assert outcome.status == ProxyProbeStatus.UNAVAILABLE
+        assert "407" in (outcome.detail or "")
+        assert outcome.detail != "Connection timed out"
+
+
+@pytest.mark.asyncio
+async def test_probe_handshake_failure_short_circuits():
+    """握手快筛失败直接返回细粒度错误码，不再烧端点超时。"""
+    proxy_dict = {"scheme": "socks5", "hostname": "10.0.0.6", "port": 1080}
+
+    with (
+        patch(
+            "backend.utils.proxy._fetch_ip_via_proxy_detailed",
+            new_callable=AsyncMock,
+        ) as mock_proxy_ip,
+        patch(
+            "backend.utils.proxy.get_host_direct_ip", new_callable=AsyncMock
+        ) as mock_host_ip,
+        patch(
+            "backend.utils.proxy.probe_telegram_handshake",
+            new_callable=AsyncMock,
+        ) as mock_handshake,
+    ):
+        mock_host_ip.return_value = "1.1.1.1"
+        mock_handshake.return_value = HandshakeResult(
+            ok=False,
+            code="PROXY_AUTH_FAILED",
+            message="代理认证失败：用户名或密码错误",
+            latency_ms=12,
+        )
+
+        outcome = await probe_proxy_exit(proxy_dict)
+        assert outcome.status == ProxyProbeStatus.UNAVAILABLE
+        assert outcome.code == "PROXY_AUTH_FAILED"
+        assert "PROXY_AUTH_FAILED" in (outcome.detail or "")
+        assert outcome.latency_ms == 12
+        assert mock_proxy_ip.call_count == 0
+
+
+@pytest.mark.asyncio
+async def test_probe_manual_failure_not_cached_and_no_breaker_count():
+    """手动测试失败不写缓存、不累计熔断；连续点测每次都真实探测。"""
+    proxy_dict = {"scheme": "socks5", "hostname": "10.0.0.7", "port": 1080}
+    breaker = get_proxy_circuit_breaker()
+
+    with (
+        patch(
+            "backend.utils.proxy._fetch_ip_via_proxy_detailed",
+            new_callable=AsyncMock,
+        ) as mock_proxy_ip,
+        patch(
+            "backend.utils.proxy.get_host_direct_ip", new_callable=AsyncMock
+        ) as mock_host_ip,
+        patch(
+            "backend.utils.proxy.probe_telegram_handshake",
+            new=_handshake_ok(),
+        ),
+    ):
+        mock_host_ip.return_value = "1.1.1.1"
+        mock_proxy_ip.return_value = (None, "ConnectTimeout: timed out")
+
+        first = await probe_proxy_exit(proxy_dict, force=True, manual=True)
+        assert first.status == ProxyProbeStatus.UNAVAILABLE
+        assert first.cached is False
+        second = await probe_proxy_exit(proxy_dict, force=True, manual=True)
+        assert second.status == ProxyProbeStatus.UNAVAILABLE
+        # 两次手动探测都不走缓存：2 次 × 2 端点
+        assert mock_proxy_ip.call_count == 2 * len(DEFAULT_PROBE_ENDPOINTS)
+
+    assert breaker.get_state(proxy_dict) == CircuitState.HEALTHY
+
+
+@pytest.mark.asyncio
+async def test_probe_manual_bypasses_tripped_breaker():
+    """熔断 TRIPPED 时手动测试仍真实探测，账号门禁仍拦截。"""
+    proxy_dict = {"scheme": "socks5", "hostname": "10.0.0.8", "port": 1080}
+    breaker = get_proxy_circuit_breaker()
+    for _ in range(3):
+        breaker.record_failure(proxy_dict)
+    assert breaker.get_state(proxy_dict) == CircuitState.TRIPPED
+
+    with (
+        patch(
+            "backend.utils.proxy._fetch_ip_via_proxy_detailed",
+            new_callable=AsyncMock,
+        ) as mock_proxy_ip,
+        patch(
+            "backend.utils.proxy.get_host_direct_ip", new_callable=AsyncMock
+        ) as mock_host_ip,
+        patch(
+            "backend.utils.proxy.probe_telegram_handshake",
+            new=_handshake_ok(),
+        ),
+    ):
+        mock_host_ip.return_value = "198.51.100.1"
+        mock_proxy_ip.return_value = ("203.0.113.5", None)
+
+        # 门禁路径先行：熔断拦截，不发网络请求
+        gated = await probe_proxy_exit(proxy_dict)
+        assert gated.status == ProxyProbeStatus.UNAVAILABLE
+        assert "circuit breaker" in (gated.detail or "").lower()
+
+        # 手动测试绕过熔断门禁，仍真实探测
+        manual = await probe_proxy_exit(proxy_dict, force=True, manual=True)
+        assert manual.status == ProxyProbeStatus.OK
+        assert manual.detail == "203.0.113.5"
+        # 手动成功不复位熔断计数
+        assert breaker.get_state(proxy_dict) == CircuitState.TRIPPED
 
 
 @pytest.mark.asyncio

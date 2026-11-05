@@ -13,6 +13,7 @@ tested on the deployed panel by the owner.
 
 from __future__ import annotations
 
+from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
@@ -206,13 +207,52 @@ def test_transport_class_for_secret_flavours():
 @pytest.mark.asyncio
 async def test_probe_handshake_closed_port_fails_closed():
     """No proxy on 127.0.0.1:1: the probe must fail, never pass."""
-    ok, detail = await probe_mtproxy_handshake(
+    ok, detail, latency_ms = await probe_mtproxy_handshake(
         {"scheme": "mtproxy", "hostname": "127.0.0.1", "port": 1, "secret": PLAIN_HEX},
         timeout=5.0,
     )
     assert ok is False
     assert detail
     assert PLAIN_HEX not in detail
+    assert latency_ms is None
+
+
+@pytest.mark.asyncio
+async def test_probe_handshake_latency_excludes_confirmation_wait(monkeypatch):
+    """握手成功时 latency 约等于连接耗时，不含 2.0s recv 确认等待。"""
+    import asyncio
+
+    class FakeTransport:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def connect(self, address):
+            await asyncio.sleep(0.05)
+
+        async def recv(self, n):
+            raise asyncio.TimeoutError()
+
+        async def close(self):
+            pass
+
+    monkeypatch.setattr(
+        "pyrogram.connection.connection.transport_class_for",
+        lambda proxy: FakeTransport,
+    )
+    monkeypatch.setattr(
+        "pyrogram.connection.proxy.normalize_proxy",
+        lambda proxy_dict: SimpleNamespace(hostname="1.2.3.4", port=443),
+    )
+
+    ok, detail, latency_ms = await probe_mtproxy_handshake(
+        {"scheme": "mtproxy", "hostname": "1.2.3.4", "port": 443, "secret": PLAIN_HEX},
+        timeout=5.0,
+    )
+    assert ok is True
+    assert detail == "MTProxy handshake OK"
+    # 连接耗时约 50ms；若把 2.0s 确认等待计入，延迟会是 ~2050ms
+    assert latency_ms is not None
+    assert 30 <= latency_ms < 1000
 
 
 def test_telethon_proxy_kwargs_mtproto():
