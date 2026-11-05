@@ -64,7 +64,8 @@
     "ACCOUNT_CHECK_FAILED": "Account status check failed, please try again later",
     "ACCOUNT_CHECK_START_FAILED": "Failed to start batch check, please try again later",
     "ACCOUNT_DELETE_FAILED": "Failed to delete account, please try again later",
-    "ACCOUNT_UPDATE_FAILED": "Failed to update account, please try again later"
+    "ACCOUNT_UPDATE_FAILED": "Failed to update account, please try again later",
+    "SESSION_TTL_FRESH_LOGIN": "This session logged in less than 24 hours ago; Telegram does not allow changing retention yet. Try again after 24 hours."
   },
   "dashboard": {
     "runbookTitle": "Operational diagnosis",

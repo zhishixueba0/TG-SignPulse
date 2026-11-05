@@ -407,4 +407,30 @@ describe('DeviceManagerModal', () => {
 
     wrapper.unmount()
   })
+
+  it('保存保留时长遇 406 新登录限制时显示对应本地化文案', async () => {
+    const err = Object.assign(new Error('SESSION_TTL_FRESH_LOGIN'), {
+      code: 'SESSION_TTL_FRESH_LOGIN',
+    })
+    vi.spyOn(api, 'updateSessionSettings').mockRejectedValue(err)
+
+    const wrapper = mount(DeviceManagerModal, {
+      props: { isOpen: true, accountName: 'test-account' },
+      attachTo: document.body,
+    })
+    await flushPromises()
+
+    const buttons = Array.from(document.body.querySelectorAll('button'))
+    const saveBtn = buttons.find((b) =>
+      (b.textContent || '').includes('accounts.saveSessionTtl'),
+    )
+    saveBtn!.click()
+    await flushPromises()
+
+    expect(document.body.textContent).toContain(
+      'This session logged in less than 24 hours ago',
+    )
+
+    wrapper.unmount()
+  })
 })

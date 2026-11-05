@@ -233,6 +233,8 @@ const API_ERROR_CODE_MESSAGES: Record<string, string> = {
   JOB_NOT_FOUND: 'Job not found',
   JOB_NOT_CANCELABLE: 'Job cannot be cancelled (missing or already finished)',
   SESSION_PASSWORD_NEEDED: 'Two-step verification enabled; enter the 2FA password',
+  SESSION_TTL_FRESH_LOGIN:
+    'This session logged in less than 24 hours ago; Telegram does not allow changing retention yet. Try again after 24 hours',
   PASSWORD_HASH_INVALID: 'Incorrect 2FA password',
   TASK_EXPORT_FAILED: 'Failed to export task',
   TASK_CONFIG_INVALID: 'Invalid task config',

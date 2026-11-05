@@ -259,7 +259,8 @@ class TelegramDevicesMixin:
 
         两项都空 → SESSION_SETTINGS_EMPTY；超范围 → *_TTL_INVALID。
         SetAuthorizationTTL / SetAccountTTL 由 Telegram 服务端执行，
-        面板不做定时删除。
+        面板不做定时删除。当前会话登录不足 24h 时 Telegram 以 406
+        FRESH_RESET_AUTHORISATION_FORBIDDEN 拒绝写入 → SESSION_TTL_FRESH_LOGIN。
         """
         from pyrogram import raw
 
@@ -310,6 +311,12 @@ class TelegramDevicesMixin:
         except AccountLockTimeout as e:
             logger.warning("设置会话保留时长获取锁超时 %s: %s", account_name, e)
             raise AccountLockTimeout("ACCOUNT_BUSY") from e
+        except Exception as e:
+            # Telegram 在当前会话登录不足 24h 时拒绝 TTL 写入（406）。
+            # 直接透传原始 RPCError 会在路由层变成 500，改成明确的业务码。
+            if "FRESH_RESET_AUTHORISATION_FORBIDDEN" in str(e):
+                raise ValueError("SESSION_TTL_FRESH_LOGIN") from e
+            raise
 
         # 写完重读一次返回（1.0.129 同款）
         return await self.get_session_settings(

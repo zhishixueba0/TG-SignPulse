@@ -87,6 +87,22 @@ async def test_set_session_settings_writes_and_rereads():
 
 
 @pytest.mark.asyncio
+async def test_set_session_settings_fresh_login_406_mapped():
+    """当前会话登录不足 24h 时 Telegram 拒写（406），映射为明确业务码。"""
+    svc = DummyDevicesService()
+    svc._client.invoke = AsyncMock(
+        side_effect=Exception(
+            "406 FRESH_RESET_AUTHORISATION_FORBIDDEN: You can't terminate "
+            "other authorized sessions because the current was logged-in "
+            "recently, please wait at least 24 hours. "
+            '(caused by "account.SetAuthorizationTTL")'
+        )
+    )
+    with pytest.raises(ValueError, match="SESSION_TTL_FRESH_LOGIN"):
+        await svc.set_session_settings("acc1", authorization_ttl_days=90)
+
+
+@pytest.mark.asyncio
 async def test_set_session_settings_empty_rejected():
     svc = DummyDevicesService()
     with pytest.raises(ValueError, match="SESSION_SETTINGS_EMPTY"):
@@ -160,3 +176,15 @@ def test_session_settings_routes(api_client, db):  # noqa: F811
         )
         assert resp.status_code == 400, resp.text
         assert resp.json()["detail"] == "SESSION_SETTINGS_EMPTY"
+
+        # 406 新登录限制 → 400 SESSION_TTL_FRESH_LOGIN（service 层映射）
+        mock_svc.set_session_settings = AsyncMock(
+            side_effect=ValueError("SESSION_TTL_FRESH_LOGIN")
+        )
+        resp = api_client.put(
+            "/api/accounts/acc1/session-settings",
+            json={"authorization_ttl_days": 90},
+            headers=_auth(token),
+        )
+        assert resp.status_code == 400, resp.text
+        assert resp.json()["detail"] == "SESSION_TTL_FRESH_LOGIN"

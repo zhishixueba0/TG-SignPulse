@@ -64,7 +64,8 @@
     "ACCOUNT_CHECK_FAILED": "账号状态检测失败，请稍后重试",
     "ACCOUNT_CHECK_START_FAILED": "启动批量检测失败，请稍后重试",
     "ACCOUNT_DELETE_FAILED": "删除账号失败，请稍后重试",
-    "ACCOUNT_UPDATE_FAILED": "更新账号信息失败，请稍后重试"
+    "ACCOUNT_UPDATE_FAILED": "更新账号信息失败，请稍后重试",
+    "SESSION_TTL_FRESH_LOGIN": "当前会话登录不足 24 小时，Telegram 暂不允许修改保留时长，请 24 小时后再试"
   },
   "dashboard": {
     "runbookTitle": "运行诊断",
