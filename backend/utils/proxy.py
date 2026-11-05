@@ -11,6 +11,13 @@ from urllib.parse import urlparse
 
 import httpx
 
+from backend.utils.mtproxy import (
+    normalize_mtproto_secret,
+    parse_mtproxy_link,
+    probe_mtproxy_handshake,
+    secret_cache_hash,
+)
+
 try:
     import socks
     from sockshandler import SocksiPyHandler
@@ -22,7 +29,7 @@ from backend.utils.cache import TTLCache
 
 logger = logging.getLogger("backend.utils.proxy")
 
-SUPPORTED_PROXY_SCHEMES = frozenset({"http", "https", "socks4", "socks5"})
+SUPPORTED_PROXY_SCHEMES = frozenset({"http", "https", "socks4", "socks5", "mtproto"})
 DEFAULT_PROBE_ENDPOINTS = (
     "https://api64.ipify.org",
     "https://icanhazip.com",
@@ -60,6 +67,9 @@ def normalize_proxy_url(raw: str) -> str:
     value = raw.strip()
     if not value:
         return value
+    link = parse_mtproxy_link(value)
+    if link is not None:
+        return link
     if "://" in value:
         return value
     if "@" in value:
@@ -88,6 +98,32 @@ def build_proxy_dict(raw: str) -> Optional[dict]:
         return None
     if not (1 <= port <= 65535):
         return None
+    if scheme == "mtproto":
+        # The URL scheme users type is "mtproto"; the dict scheme
+        # Kurigram expects is "mtproxy" (its ProxyScheme value), and
+        # the secret travels under the "secret" key, never as a
+        # username/password. Secret comes from the userinfo part
+        # (mtproto://<secret>@host:port) or the ?secret= query.
+        secret = None
+        if parsed.username:
+            secret = urllib.parse.unquote(parsed.username)
+        if not secret:
+            query = urllib.parse.parse_qs(parsed.query)
+            values = query.get("secret")
+            if values:
+                secret = values[0]
+        if not secret:
+            return None
+        try:
+            secret = normalize_mtproto_secret(secret)
+        except ValueError:
+            return None
+        return {
+            "scheme": "mtproxy",
+            "hostname": parsed.hostname,
+            "port": port,
+            "secret": secret,
+        }
     proxy = {
         "scheme": scheme,
         "hostname": parsed.hostname,
@@ -120,6 +156,10 @@ def format_proxy_url(raw: str | dict | None) -> Optional[str]:
     if not proxy_dict or not proxy_dict.get("hostname") or not proxy_dict.get("port"):
         return None
     scheme = str(proxy_dict.get("scheme", "http")).lower()
+    if scheme == "mtproxy":
+        # Display form uses the user-facing scheme and never carries
+        # the secret: mtproto://host:port.
+        scheme = "mtproto"
     host = _format_host_for_url(str(proxy_dict["hostname"]))
     user = proxy_dict.get("username")
     pwd = proxy_dict.get("password")
@@ -141,6 +181,11 @@ def _make_proxy_cache_key(proxy_dict: dict) -> str:
     port = str(proxy_dict.get("port", ""))
     user = str(proxy_dict.get("username") or "")
     pwd = str(proxy_dict.get("password") or "")
+    secret = str(proxy_dict.get("secret") or "")
+    if secret:
+        # Same host:port with a different secret is a different proxy;
+        # only the hash goes into the key, never the secret itself.
+        return f"{scheme}://{user}:{pwd}:{secret_cache_hash(secret)}@{host}:{port}"
     return f"{scheme}://{user}:{pwd}@{host}:{port}"
 
 
@@ -253,6 +298,10 @@ async def probe_proxy_exit(
     - 否则返回 OK 及探测到的出口 IP
     具备 TTL=600s 缓存；UNAVAILABLE 同样入缓存，避免代理不可达时
     每次账号操作都阻塞在 8s×端点数的重复探测上。
+    MTProxy 例外：MTProto 不是 HTTP，出口 IP 探针无法穿过它，
+    因此改走真实的 MTProxy 握手探测（见 probe_mtproxy_handshake）：
+    握手成功返回 OK，失败返回 UNAVAILABLE。TCP 端口通但握手失败
+    时绝不算通过。
     """
     if not proxy_dict:
         return ProxyProbeStatus.UNAVAILABLE, "No proxy configured"
@@ -270,6 +319,20 @@ async def probe_proxy_exit(
             ProxyProbeStatus.UNAVAILABLE,
             "Proxy circuit breaker tripped (cooling down or unreachable)",
         )
+
+    if str(proxy_dict.get("scheme", "")).lower() == "mtproxy":
+        # MTProto carries no HTTP: the only meaningful check is the
+        # real handshake against a DC (see backend/utils/mtproxy.py).
+        # A bare TCP port-open must never count as "proxy works".
+        ok, detail = await probe_mtproxy_handshake(proxy_dict, timeout=timeout)
+        if ok:
+            result = (ProxyProbeStatus.OK, detail)
+            breaker.record_success(proxy_dict)
+        else:
+            result = (ProxyProbeStatus.UNAVAILABLE, detail)
+            breaker.record_failure(proxy_dict)
+        _PROBE_CACHE.set(cache_key, result)
+        return result
 
     if host_ip is None:
         host_ip = await get_host_direct_ip(timeout=min(timeout, 5.0))

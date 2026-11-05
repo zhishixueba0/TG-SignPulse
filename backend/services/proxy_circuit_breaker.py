@@ -115,9 +115,11 @@ class ProxyCircuitBreaker:
 
     def _proxy_key(self, proxy: Dict[str, Any]) -> str:
         # 凭据不同的同址代理不能共享熔断状态；只持久化哈希，不泄露密码。
+        # MTProxy 的 secret 同样参与区分（只进哈希，不进明文）。
         s = (
             f"{proxy.get('scheme')}://{proxy.get('username', '')}:"
-            f"{proxy.get('password', '')}@{proxy.get('hostname')}:{proxy.get('port')}"
+            f"{proxy.get('password', '')}:{proxy.get('secret', '')}"
+            f"@{proxy.get('hostname')}:{proxy.get('port')}"
         )
         return hashlib.sha256(s.encode("utf-8")).hexdigest()[:16]
 

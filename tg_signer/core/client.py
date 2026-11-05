@@ -753,6 +753,26 @@ def get_proxy(proxy: str = None):
     except (ValueError, AttributeError):
         return None
     scheme = (r.scheme or "").lower()
+    if scheme == "mtproto":
+        # The dict scheme Kurigram expects is "mtproxy"; the secret
+        # comes from the userinfo part (mtproto://<secret>@host:port)
+        # or the ?secret= query. Kurigram validates the secret itself
+        # when the Client is built, so a bad secret fails closed there.
+        secret = parse.unquote(r.username) if r.username else None
+        if not secret:
+            query = parse.parse_qs(r.query)
+            values = query.get("secret")
+            secret = values[0] if values else None
+        if not secret or not r.hostname or not port:
+            return None
+        if not (1 <= port <= 65535):
+            return None
+        return {
+            "scheme": "mtproxy",
+            "hostname": r.hostname,
+            "port": port,
+            "secret": secret,
+        }
     if not (scheme in {"http", "https", "socks4", "socks5"} and r.hostname and port):
         return None
     if not (1 <= port <= 65535):

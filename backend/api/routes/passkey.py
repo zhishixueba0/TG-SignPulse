@@ -28,9 +28,14 @@ default is in use. Never send api_id/api_hash in chat; set them
 in the panel's Telegram settings.
 
 Proxy: optional proxy URL string (the same format the panel stores
-per account). socks5 / socks4 / http / https only. mtproto is
-rejected with a clear error -- it is added by a separate patch.
-A proxy failure is a failure, never a silent fallback to direct.
+per account). socks5 / socks4 / http / https, plus mtproto
+(mtproto://<secret>@host:port or a tg://proxy? share link).
+MTProto uses Telethon's native MTProxy connection class; Telethon
+has no fake-TLS, so an ee secret is used as a plain obfuscated2 key
+(its 16-byte key part) -- Kurigram logins support ee properly,
+passkey login through an ee proxy is best-effort and fails closed
+if the proxy rejects it. A proxy failure is a failure, never a
+silent fallback to direct.
 """
 
 from __future__ import annotations
@@ -46,7 +51,6 @@ import time
 import uuid
 from pathlib import Path
 from typing import Optional
-from urllib.parse import urlparse
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
@@ -219,41 +223,47 @@ def _resolve_api(body_api_id, body_api_hash):
 def _telethon_proxy_kwargs(proxy_url: Optional[str]):
     """Map a panel proxy URL string to Telethon client kwargs.
 
-    socks5 / socks4 / http / https only. mtproto is rejected here --
-    it is added by a separate patch and must never silently fall
-    back to direct.
+    socks5 / socks4 / http / https use Telethon's proxy dict;
+    mtproto uses Telethon's native MTProxy connection class with the
+    raw secret string (Telethon normalizes ee/dd prefixes itself).
+    A proxy failure is a failure, never a silent fallback to direct.
     """
     if not proxy_url:
         return {}
-    u = urlparse(proxy_url.strip())
-    scheme = (u.scheme or "").lower()
-    if scheme == "mtproto":
+    d = build_proxy_dict(proxy_url)
+    if d is None:
         raise HTTPException(
             status_code=400,
-            detail="Passkey login does not support mtproto proxies yet, "
-            "use socks5/http or direct",
+            detail="Proxy URL is invalid, expected scheme://[user:pass@]host:port",
         )
+    scheme = str(d.get("scheme") or "")
+    if scheme == "mtproxy":
+        # Telethon has no fake-TLS: an ee secret is used as a plain
+        # obfuscated2 key (its 16-byte key part). Kurigram logins
+        # support ee properly; passkey login through an ee proxy is
+        # best-effort and fails closed if the proxy rejects it.
+        from telethon.network import ConnectionTcpMTProxyRandomizedIntermediate
+
+        return {
+            "proxy": (d["hostname"], int(d["port"]), str(d["secret"])),
+            "connection": ConnectionTcpMTProxyRandomizedIntermediate,
+        }
     if scheme not in ("socks5", "socks4", "http", "https"):
         raise HTTPException(
             status_code=400,
             detail=f"Passkey login does not support proxy type {scheme or 'unknown'}",
         )
-    if build_proxy_dict(proxy_url) is None:
-        raise HTTPException(
-            status_code=400,
-            detail="Proxy URL is invalid, expected scheme://[user:pass@]host:port",
-        )
-    d = {
+    kwargs = {
         "proxy_type": scheme,
-        "addr": u.hostname,
-        "port": int(u.port or 1080),
+        "addr": d["hostname"],
+        "port": int(d["port"]),
         "rdns": True,
     }
-    if u.username:
-        d["username"] = u.username
-    if u.password:
-        d["password"] = u.password
-    return {"proxy": d}
+    if d.get("username"):
+        kwargs["username"] = d["username"]
+    if d.get("password"):
+        kwargs["password"] = d["password"]
+    return {"proxy": kwargs}
 
 
 async def _complete_login(
@@ -372,7 +382,7 @@ def passkey_status(current_user: User = Depends(get_current_user)):
         "passkey_available": telethon_version is not None,
         "telethon_version": telethon_version,
         "api_is_custom": is_custom,
-        "proxy_supported": ["socks5", "socks4", "http", "https"],
+        "proxy_supported": ["socks5", "socks4", "http", "https", "mtproto"],
     }
 
 
