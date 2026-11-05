@@ -14,6 +14,15 @@ describe('api barrel 完整性', () => {
     expect(typeof api.startQrLogin).toBe('function')
     expect(typeof api.fetchAccountAvatar).toBe('function')
     expect(typeof api.downloadAccountLogs).toBe('function')
+    expect(typeof api.refreshAccountProfile).toBe('function')
+    expect(typeof api.moveAccount).toBe('function')
+    expect(typeof api.pauseAccount).toBe('function')
+    expect(typeof api.resumeAccount).toBe('function')
+  })
+  it('聊天中心 API 导出', () => {
+    expect(typeof api.listChatDialogs).toBe('function')
+    expect(typeof api.listChatMessages).toBe('function')
+    expect(typeof api.sendChatMessage).toBe('function')
   })
   it('sign-tasks API 导出', () => {
     expect(typeof api.listSignTasks).toBe('function')

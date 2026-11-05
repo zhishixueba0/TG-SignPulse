@@ -7,6 +7,7 @@
  */
 export * from "./auth";
 export * from "./accounts";
+export * from "./chats";
 export * from "./proxies";
 export * from "./sign-tasks";
 export * from "./keyword-hits";

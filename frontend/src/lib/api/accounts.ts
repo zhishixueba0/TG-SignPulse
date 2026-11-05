@@ -117,6 +117,9 @@ export interface AccountInfo {
   proxy_id?: string | null;
   proxy_label?: string | null;
   added_at?: string | null;
+  /** 自定义顺序（Batch 2，服务端持久化）与暂停标志（Batch 5） */
+  sort_order?: number | null;
+  paused?: boolean;
 }
 
 export interface AccountStatusCheckRequest {
@@ -295,6 +298,42 @@ export const listAccountOfficialMessages = (token: string, accountName: string, 
     {},
     token,
     MEDIUM_TIMEOUT_MS,
+  );
+
+/** 刷新账号资料：调 get_me 重拉身份并更新缓存 */
+export const refreshAccountProfile = (token: string, accountName: string) =>
+  request<{ success: boolean; message: string; account?: AccountInfo | null }>(
+    `/accounts/${encodeURIComponent(accountName)}/refresh-profile`,
+    { method: "POST" },
+    token,
+    MEDIUM_TIMEOUT_MS,
+  );
+
+/** 上移 / 下移账号（自定义顺序持久化） */
+export const moveAccount = (
+  token: string,
+  accountName: string,
+  direction: "up" | "down",
+) =>
+  request<{ success: boolean; moved: boolean; message: string; account?: AccountInfo | null }>(
+    `/accounts/${encodeURIComponent(accountName)}/move`,
+    { method: "POST", body: JSON.stringify({ direction }) },
+    token,
+  );
+
+/** 暂停 / 恢复账号 */
+export const pauseAccount = (token: string, accountName: string) =>
+  request<{ success: boolean; message: string; account?: AccountInfo | null }>(
+    `/accounts/${encodeURIComponent(accountName)}/pause`,
+    { method: "POST" },
+    token,
+  );
+
+export const resumeAccount = (token: string, accountName: string) =>
+  request<{ success: boolean; message: string; account?: AccountInfo | null }>(
+    `/accounts/${encodeURIComponent(accountName)}/resume`,
+    { method: "POST" },
+    token,
   );
 
 export const updateAccount = (

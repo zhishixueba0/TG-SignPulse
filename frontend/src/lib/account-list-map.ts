@@ -92,7 +92,7 @@ export function compareAccountNames(a: string, b: string): number {
   return a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" })
 }
 
-/** 账号列表排序键：custom 为服务端返回的原始顺序（本次不做服务端持久化） */
+/** 账号列表排序键：custom 为服务端返回的原始顺序（即 sort_order 持久化顺序） */
 export type AccountSortKey = 'custom' | 'abnormal' | 'oldestChecked' | 'name'
 
 /** 账号列表状态筛选：受限（SpamBot）目前分不出来，见 GAP-ACCOUNTS.md */
@@ -177,6 +177,20 @@ export function collectAccountDcIds<T extends { raw?: { dc_id?: number | null } 
     if (typeof a.raw?.dc_id === 'number') ids.add(a.raw.dc_id)
   }
   return [...ids].sort((x, y) => x - y)
+}
+
+/**
+ * 上移/下移可用态：按完整自定义顺序（服务端返回顺序）里的下标判定，
+ * 与列表筛选/排序下拉无关——筛选后隐藏的邻居仍参与顺序交换。
+ */
+export function canMoveAccount(index: number, total: number): {
+  canMoveUp: boolean
+  canMoveDown: boolean
+} {
+  return {
+    canMoveUp: index > 0,
+    canMoveDown: index >= 0 && index < total - 1,
+  }
 }
 
 export function filterAccountsByDc<T extends { raw?: { dc_id?: number | null } }>(

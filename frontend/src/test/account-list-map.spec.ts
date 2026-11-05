@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import {
+  canMoveAccount,
   collectAccountDcIds,
   compareAccountNames,
   filterAccountsByDc,
@@ -126,5 +127,12 @@ describe('account sort / filter (Batch 1)', () => {
     expect(filterAccountsByDc(list, null)).toHaveLength(4)
     expect(filterAccountsByDc(list, 5).map((a) => a.name)).toEqual(['a', 'c'])
     expect(filterAccountsByDc(list, 2)).toHaveLength(0)
+  })
+
+  it('move bounds: first cannot move up, last cannot move down', () => {
+    expect(canMoveAccount(0, 3)).toEqual({ canMoveUp: false, canMoveDown: true })
+    expect(canMoveAccount(1, 3)).toEqual({ canMoveUp: true, canMoveDown: true })
+    expect(canMoveAccount(2, 3)).toEqual({ canMoveUp: true, canMoveDown: false })
+    expect(canMoveAccount(0, 1)).toEqual({ canMoveUp: false, canMoveDown: false })
   })
 })

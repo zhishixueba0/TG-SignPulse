@@ -1,19 +1,21 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, computed, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { Play, FileText, Edit2, Trash2, Plus, QrCode, Phone, Zap, MonitorSmartphone, MessageCircle, CheckCircle2, Search, RefreshCw, XCircle, X, Users, FileDown, KeyRound, LayoutGrid, List, Eye, EyeOff } from 'lucide-vue-next'
+import { Play, FileText, Edit2, Trash2, Plus, QrCode, Phone, Zap, MonitorSmartphone, MessageCircle, MessagesSquare, MoreHorizontal, CheckCircle2, Search, RefreshCw, XCircle, X, Users, FileDown, KeyRound, LayoutGrid, List, Eye, EyeOff } from 'lucide-vue-next'
 import {
   fetchAccountAvatar,
 } from '../lib/api'
 import { getAuthToken } from '../lib/api/core'
 import { useI18n } from '../composables/useI18n'
 import { useToast } from '../composables/useToast'
+import { useConfirm } from '../composables/useConfirm'
 import { useAccountsStore } from '../stores/accounts'
 import { useAccountBatchCheck } from '../composables/useAccountBatchCheck'
 import type { AccountUiItem } from '../lib/types'
 import { notifyApiError } from '../lib/notify'
 import AccountImpactModal from '../components/accounts/AccountImpactModal.vue'
-import { previewAccountChange, applyAccountChange, type AccountChangePlan } from '../lib/api/accounts'
+import { previewAccountChange, applyAccountChange, refreshAccountProfile, moveAccount, pauseAccount, resumeAccount, type AccountChangePlan } from '../lib/api/accounts'
+import AccountTagsModal from '../components/accounts/AccountTagsModal.vue'
 import AddAccountModal from '../components/accounts/AddAccountModal.vue'
 import EditAccountModal from '../components/accounts/EditAccountModal.vue'
 import DeviceManagerModal from '../components/accounts/DeviceManagerModal.vue'
@@ -24,6 +26,7 @@ import { devLog } from '../lib/devLog'
 import { AVATAR_FETCH_CONCURRENCY, mapPool } from '../lib/async-pool'
 import { AvatarUrlCache } from '../lib/avatar-cache'
 import {
+  canMoveAccount,
   collectAccountDcIds,
   filterAccountsByDc,
   filterAccountsByQuery,
@@ -53,6 +56,7 @@ const proxyLineLabel = (acc: AccountUiItem): string => {
 const router = useRouter()
 const { t } = useI18n()
 const toast = useToast()
+const { confirm } = useConfirm()
 const accountsStore = useAccountsStore()
 const accounts = ref<AccountUiItem[]>([])
 const pageLoading = ref(true)
@@ -326,6 +330,88 @@ const goLogs = (name: string) => {
 const goTasks = (name: string) => {
   router.push({ name: 'tasks', query: { account: name } })
 }
+
+const goChats = (name: string) => {
+  router.push({ name: 'chats', query: { account: name } })
+}
+
+/** 卡片“···”菜单：同一时刻只开一个；点菜单外任意处或按 Esc 关闭 */
+const openMenuName = ref<string | null>(null)
+const toggleMenu = (name: string) => {
+  openMenuName.value = openMenuName.value === name ? null : name
+}
+const closeMenu = () => {
+  openMenuName.value = null
+}
+
+/** 上移/下移按完整自定义顺序（服务端返回顺序）判定，与筛选/排序下拉无关 */
+const accountOrderIndex = (acc: AccountUiItem): number =>
+  accounts.value.findIndex((a) => a.name === acc.name)
+const moveState = (acc: AccountUiItem) =>
+  canMoveAccount(accountOrderIndex(acc), accounts.value.length)
+
+const handleRefreshProfile = async (acc: AccountUiItem) => {
+  closeMenu()
+  try {
+    await refreshAccountProfile(getAuthToken(), acc.name)
+    toast.success(t('accounts.refreshProfileSuccess'))
+    await loadAccounts()
+  } catch (e: unknown) {
+    notifyApiError(e, 'accounts.refreshProfileFailed')
+  }
+}
+
+const handleMove = async (acc: AccountUiItem, direction: 'up' | 'down') => {
+  closeMenu()
+  try {
+    const res = await moveAccount(getAuthToken(), acc.name, direction)
+    if (res.moved) {
+      await loadAccounts()
+    } else {
+      toast.info(direction === 'up' ? t('accounts.moveTopReached') : t('accounts.moveBottomReached'))
+    }
+  } catch (e: unknown) {
+    notifyApiError(e, 'accounts.moveFailed')
+  }
+}
+
+const handlePauseToggle = async (acc: AccountUiItem) => {
+  closeMenu()
+  try {
+    if (acc.raw.paused) {
+      await resumeAccount(getAuthToken(), acc.name)
+      toast.success(t('accounts.resumeAccountSuccess'))
+    } else {
+      const ok = await confirm({
+        title: t('accounts.pauseAccountConfirmTitle'),
+        message: t('accounts.pauseAccountConfirmMessage'),
+      })
+      if (!ok) return
+      await pauseAccount(getAuthToken(), acc.name)
+      toast.success(t('accounts.pauseAccountSuccess'))
+    }
+    await loadAccounts()
+  } catch (e: unknown) {
+    notifyApiError(e, acc.raw.paused ? 'accounts.resumeAccountFailed' : 'accounts.pauseAccountFailed')
+  }
+}
+
+/** 标签弹窗：append 卡片“+ 添加标签”（只追加），edit 菜单“编辑标签”（全量） */
+const showTagsModal = ref(false)
+const tagsAccount = ref<AccountUiItem | null>(null)
+const tagsMode = ref<'append' | 'edit'>('append')
+const openTagsModal = (acc: AccountUiItem, mode: 'append' | 'edit') => {
+  closeMenu()
+  tagsAccount.value = acc
+  tagsMode.value = mode
+  showTagsModal.value = true
+}
+
+/** 导出会话包：复用设备弹窗里的独立 Session 导出入口（同一份实现，不另起一套） */
+const handleExportSession = (acc: AccountUiItem) => {
+  closeMenu()
+  openDevices(acc.name)
+}
 </script>
 
 <template>
@@ -594,6 +680,10 @@ const goTasks = (name: string) => {
                   {{ acc.status === 'active' ? t('accounts.statusOk') : (acc.message || t('accounts.statusUnknown')) }}
                 </span>
               </span>
+              <span v-if="acc.raw.paused" class="ui-badge ui-badge-warn shrink-0">
+                <span class="ui-badge-dot" />
+                <span class="truncate">{{ t('accounts.pausedBadge') }}</span>
+              </span>
             </div>
             <div class="text-xs text-[var(--sp-text-muted)] truncate mt-0.5">
               <span v-if="acc.raw.phone" class="font-mono cursor-pointer" :title="t('accounts.clickToReveal')" @click="toggleRevealPhone(acc)">{{ phoneText(acc) }}</span>
@@ -608,6 +698,10 @@ const goTasks = (name: string) => {
               <span v-if="checkingAccount === acc.name" class="ui-spinner !w-3.5 !h-3.5 !border-2" />
               <Play v-else class="w-3.5 h-3.5" />
               <span>{{ t('accounts.check') }}</span>
+            </button>
+            <button type="button" class="ui-btn-secondary !px-2 !py-1.5 !text-xs inline-flex items-center gap-1 cursor-pointer" :title="t('accounts.chat')" @click="goChats(acc.name)">
+              <MessagesSquare class="w-3.5 h-3.5" />
+              <span>{{ t('accounts.chat') }}</span>
             </button>
             <button type="button" class="ui-btn-secondary !px-2 !py-1.5 !text-xs inline-flex items-center gap-1 cursor-pointer" :title="t('accounts.viewTasks')" @click="goTasks(acc.name)">
               <Zap class="w-3.5 h-3.5" />
@@ -633,6 +727,26 @@ const goTasks = (name: string) => {
               <Trash2 class="w-3.5 h-3.5" />
               <span>{{ t('accounts.deleteBtn') }}</span>
             </button>
+            <div class="relative">
+              <button type="button" class="ui-btn-secondary !px-2 !py-1.5 !text-xs inline-flex items-center gap-1 cursor-pointer" :aria-expanded="openMenuName === acc.name" :aria-label="t('accounts.moreActions')" :title="t('accounts.moreActions')" @click="toggleMenu(acc.name)">
+                <MoreHorizontal class="w-3.5 h-3.5" />
+              </button>
+              <div v-if="openMenuName === acc.name" class="fixed inset-0 z-40" aria-hidden="true" @click="closeMenu" />
+              <div v-if="openMenuName === acc.name" class="absolute right-0 top-full mt-1 z-50 min-w-44 ui-card p-1 shadow-[var(--sp-shadow-md)]" role="menu">
+                <button type="button" role="menuitem" class="ui-menu-item" @click="handleRelogin(acc.name)">{{ t('accounts.relogin') }}</button>
+                <button type="button" role="menuitem" class="ui-menu-item" @click="handleRefreshProfile(acc)">{{ t('accounts.refreshProfile') }}</button>
+                <button type="button" role="menuitem" class="ui-menu-item" @click="openTagsModal(acc, 'edit')">{{ t('accounts.editTags') }}</button>
+                <button type="button" role="menuitem" class="ui-menu-item" :disabled="!moveState(acc).canMoveUp" @click="handleMove(acc, 'up')">{{ t('accounts.moveUp') }}</button>
+                <button type="button" role="menuitem" class="ui-menu-item" :disabled="!moveState(acc).canMoveDown" @click="handleMove(acc, 'down')">{{ t('accounts.moveDown') }}</button>
+                <button type="button" role="menuitem" class="ui-menu-item" @click="handlePauseToggle(acc)">{{ acc.raw.paused ? t('accounts.resumeAccount') : t('accounts.pauseAccount') }}</button>
+                <button type="button" role="menuitem" class="ui-menu-item" @click="openEdit(acc)">{{ t('accounts.nameRemarkProxy') }}</button>
+                <button type="button" role="menuitem" class="ui-menu-item" @click="handleExportSession(acc)">{{ t('accounts.exportSessionPackage') }}</button>
+                <button type="button" role="menuitem" class="ui-menu-item" @click="goLogs(acc.name)">{{ t('accounts.runLogs') }}</button>
+                <button type="button" role="menuitem" class="ui-menu-item" @click="openDevices(acc.name)">{{ t('accounts.devicesAndSessions') }}</button>
+                <button type="button" role="menuitem" class="ui-menu-item" @click="openOfficialMessages(acc.name)">{{ t('accounts.officialMessages') }}</button>
+                <button type="button" role="menuitem" class="ui-menu-item !text-rose-600 dark:!text-rose-400" @click="handleDelete(acc.name)">{{ t('accounts.deleteBtn') }}</button>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -661,7 +775,7 @@ const goTasks = (name: string) => {
         </div>
         
         <!-- Status Indicator -->
-        <div class="flex items-center gap-2 shrink-0 max-w-[45%]">
+        <div class="flex items-center gap-1.5 shrink-0 max-w-[45%]">
           <span
             class="ui-badge max-w-full"
             :class="{
@@ -676,6 +790,30 @@ const goTasks = (name: string) => {
               {{ acc.status === 'active' ? t('accounts.statusOk') : (acc.message || t('accounts.statusUnknown')) }}
             </span>
           </span>
+          <span v-if="acc.raw.paused" class="ui-badge ui-badge-warn shrink-0">
+            <span class="ui-badge-dot" />
+            <span class="truncate">{{ t('accounts.pausedBadge') }}</span>
+          </span>
+          <div class="relative shrink-0">
+            <button type="button" class="ui-btn-secondary !px-1.5 !py-1.5 !text-xs inline-flex items-center cursor-pointer" :aria-expanded="openMenuName === acc.name" :aria-label="t('accounts.moreActions')" :title="t('accounts.moreActions')" @click="toggleMenu(acc.name)">
+              <MoreHorizontal class="w-3.5 h-3.5" />
+            </button>
+            <div v-if="openMenuName === acc.name" class="fixed inset-0 z-40" aria-hidden="true" @click="closeMenu" />
+            <div v-if="openMenuName === acc.name" class="absolute right-0 top-full mt-1 z-50 min-w-44 ui-card p-1 shadow-[var(--sp-shadow-md)]" role="menu">
+              <button type="button" role="menuitem" class="ui-menu-item" @click="handleRelogin(acc.name)">{{ t('accounts.relogin') }}</button>
+              <button type="button" role="menuitem" class="ui-menu-item" @click="handleRefreshProfile(acc)">{{ t('accounts.refreshProfile') }}</button>
+              <button type="button" role="menuitem" class="ui-menu-item" @click="openTagsModal(acc, 'edit')">{{ t('accounts.editTags') }}</button>
+              <button type="button" role="menuitem" class="ui-menu-item" :disabled="!moveState(acc).canMoveUp" @click="handleMove(acc, 'up')">{{ t('accounts.moveUp') }}</button>
+              <button type="button" role="menuitem" class="ui-menu-item" :disabled="!moveState(acc).canMoveDown" @click="handleMove(acc, 'down')">{{ t('accounts.moveDown') }}</button>
+              <button type="button" role="menuitem" class="ui-menu-item" @click="handlePauseToggle(acc)">{{ acc.raw.paused ? t('accounts.resumeAccount') : t('accounts.pauseAccount') }}</button>
+              <button type="button" role="menuitem" class="ui-menu-item" @click="openEdit(acc)">{{ t('accounts.nameRemarkProxy') }}</button>
+              <button type="button" role="menuitem" class="ui-menu-item" @click="handleExportSession(acc)">{{ t('accounts.exportSessionPackage') }}</button>
+              <button type="button" role="menuitem" class="ui-menu-item" @click="goLogs(acc.name)">{{ t('accounts.runLogs') }}</button>
+              <button type="button" role="menuitem" class="ui-menu-item" @click="openDevices(acc.name)">{{ t('accounts.devicesAndSessions') }}</button>
+              <button type="button" role="menuitem" class="ui-menu-item" @click="openOfficialMessages(acc.name)">{{ t('accounts.officialMessages') }}</button>
+              <button type="button" role="menuitem" class="ui-menu-item !text-rose-600 dark:!text-rose-400" @click="handleDelete(acc.name)">{{ t('accounts.deleteBtn') }}</button>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -701,10 +839,11 @@ const goTasks = (name: string) => {
           <span class="text-[var(--sp-text-muted)] shrink-0">{{ t('accounts.registeredAt') }}：</span>
           <span class="text-[var(--sp-text-secondary)] truncate">{{ acc.raw.added_at ? acc.raw.added_at.slice(0, 10) : t('accounts.registeredUnknown') }}</span>
         </div>
-        <div v-if="acc.raw.tags && acc.raw.tags.length > 0" class="flex gap-1.5 items-start">
+        <div class="flex gap-1.5 items-start">
           <span class="text-[var(--sp-text-muted)] shrink-0">{{ t('accounts.tags') }}：</span>
-          <span class="flex flex-wrap gap-1 min-w-0">
+          <span class="flex flex-wrap items-center gap-1 min-w-0">
             <span v-for="tag in acc.raw.tags" :key="tag" class="ui-badge !py-0 !px-1.5">{{ tag }}</span>
+            <button type="button" class="text-xs text-[var(--sp-accent)] hover:underline cursor-pointer" @click="openTagsModal(acc, 'append')">+ {{ t('accounts.addTags') }}</button>
           </span>
         </div>
         <div class="flex gap-1.5">
@@ -718,11 +857,15 @@ const goTasks = (name: string) => {
       </div>
 
       <!-- Actions：竖排布局保留，语义走 ui-row-action -->
-      <div class="mt-auto pt-3 border-t border-[var(--sp-border)] grid grid-cols-7 gap-0.5">
+      <div class="mt-auto pt-3 border-t border-[var(--sp-border)] grid grid-cols-8 gap-0.5">
         <button type="button" class="ui-row-action ui-row-action--stack" :disabled="checkingAccount === acc.name" :title="t('accounts.checkStatus')" @click="handleCheck(acc.name)">
           <span v-if="checkingAccount === acc.name" class="ui-spinner !w-3.5 !h-3.5 !border-2" />
           <Play v-else class="w-3.5 h-3.5" />
           <span>{{ t('accounts.check') }}</span>
+        </button>
+        <button type="button" class="ui-row-action ui-row-action--stack" :title="t('accounts.chat')" @click="goChats(acc.name)">
+          <MessagesSquare class="w-3.5 h-3.5" />
+          <span>{{ t('accounts.chat') }}</span>
         </button>
         <button type="button" class="ui-row-action ui-row-action--stack" :title="t('accounts.viewTasks')" @click="goTasks(acc.name)">
           <Zap class="w-3.5 h-3.5" />
@@ -786,6 +929,7 @@ const goTasks = (name: string) => {
 
     <!-- Modals -->
     <AccountImpactModal :isOpen="!!changePlan" :plan="changePlan" :loading="changeLoading" :error="changeError" @close="changePlan = null" @apply="applyDelete" />
+    <AccountTagsModal :isOpen="showTagsModal" :account="tagsAccount" :mode="tagsMode" @close="showTagsModal = false" @success="loadAccounts" />
     <AddAccountModal :isOpen="showAddModal" :initialMethod="initialMethod" :initialAccountName="initialAccountName" @close="showAddModal = false" @success="loadAccounts" />
     <EditAccountModal v-if="editingAccount" :isOpen="showEditModal" :account="editingAccount" @close="showEditModal = false" @closed="onEditModalClosed" @success="loadAccounts" @relogin="handleRelogin" />
     <DeviceManagerModal :isOpen="showDeviceModal" :accountName="deviceAccountName" @close="showDeviceModal = false" />
