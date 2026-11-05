@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { ref, watch, onUnmounted } from 'vue'
-import { Phone, QrCode, FileDown } from 'lucide-vue-next'
+import { ref, watch, onUnmounted, computed } from 'vue'
+import { Phone, QrCode, FileDown, KeyRound } from 'lucide-vue-next'
 import Modal from '../Modal.vue'
 import {
   startAccountLogin,
@@ -12,6 +12,9 @@ import {
   cancelQrLogin,
   importAccountSession,
   importAccountSessionFile,
+  getPasskeyStatus,
+  passkeyLogin,
+  submitPasskeyPassword,
 } from '../../lib/api'
 import { getAuthToken } from '../../lib/api/core'
 import { useI18n } from '../../composables/useI18n'
@@ -23,10 +26,10 @@ import { devLog } from '../../lib/devLog'
 const { t } = useI18n()
 const toast = useToast()
 
-const props = defineProps<{ isOpen: boolean, initialMethod?: 'code' | 'qr' | 'import', initialAccountName?: string }>()
+const props = defineProps<{ isOpen: boolean, initialMethod?: 'code' | 'qr' | 'import' | 'passkey', initialAccountName?: string }>()
 const emit = defineEmits<{ (e: 'close'): void, (e: 'success'): void }>()
 
-const loginMethod = ref<'code' | 'qr' | 'import'>('code')
+const loginMethod = ref<'code' | 'qr' | 'import' | 'passkey'>('code')
 
 const form = ref({
   account_name: '',
@@ -37,6 +40,9 @@ const form = ref({
   proxy: '',
   session_content: '',
   tdata_password: '',
+  credential_id: '',
+  private_key_pem: '',
+  user_handle: '',
 })
 
 const loading = ref(false)
@@ -89,6 +95,26 @@ const startCodeCountdown = () => {
 const phoneCodeHash = ref('')
 const codeSent = ref(false)
 
+// Passkey login specific
+const passkeyId = ref('')
+const passkeyNeedPassword = ref(false)
+const showPrivateKey = ref(false)
+const passkeyStatus = ref<{ passkey_available: boolean, api_is_custom: boolean } | null>(null)
+// Private key is masked by default (-webkit-text-security); toggling
+// reveals the pasted PEM. The textarea keeps newlines so the PEM
+// stays parseable, unlike a single-line password input.
+const privateKeyStyle = computed(() => showPrivateKey.value ? {} : { '-webkit-text-security': 'disc' })
+
+const checkPasskeyStatus = async () => {
+  const token = getAuthToken()
+  if (!token) return
+  try {
+    passkeyStatus.value = await getPasskeyStatus(token)
+  } catch (e: unknown) {
+    devLog.warn('getPasskeyStatus failed:', getLocalizedErrorMessage(e, t))
+  }
+}
+
 // QR login specific
 const qrImage = ref('')
 const loginId = ref('')
@@ -121,7 +147,14 @@ const reset = async () => {
     proxy: '',
     session_content: '',
     tdata_password: '',
+    credential_id: '',
+    private_key_pem: '',
+    user_handle: '',
   }
+  passkeyId.value = ''
+  passkeyNeedPassword.value = false
+  showPrivateKey.value = false
+  passkeyStatus.value = null
   highlightTdataPassword.value = false
   phoneCodeHash.value = ''
   error.value = ''
@@ -142,6 +175,7 @@ watch(() => props.isOpen, (val) => {
   if (val) {
     if (props.initialMethod) loginMethod.value = props.initialMethod
     reset()
+    if (loginMethod.value === 'passkey') void checkPasskeyStatus()
   } else {
     reset()
   }
@@ -161,6 +195,7 @@ watch(loginMethod, () => {
   form.value.password = password
   form.value.proxy = proxy
   form.value.tdata_password = tdataPassword
+  if (loginMethod.value === 'passkey') void checkPasskeyStatus()
 })
 
 const handleClose = () => {
@@ -379,6 +414,55 @@ const handleSave = async () => {
     return
   }
 
+  if (loginMethod.value === 'passkey') {
+    if (passkeyNeedPassword.value) {
+      if (!form.value.password) {
+        error.value = t('addAccount.needPassword')
+        loading.value = false
+        return
+      }
+      await runSaveStep(async () => {
+        await submitPasskeyPassword(token, {
+          passkey_id: passkeyId.value,
+          password: form.value.password,
+        })
+        toast.success(t('addAccount.loginSuccess'))
+        emit('success')
+        handleClose()
+      }).catch((e: unknown) => {
+        error.value = getLocalizedErrorMessage(e, t) || t('addAccount.passkeyFailed')
+      })
+      return
+    }
+    if (!form.value.credential_id.trim() || !form.value.private_key_pem.trim() || !form.value.user_handle.trim()) {
+      error.value = t('addAccount.passkeyFieldsRequired')
+      loading.value = false
+      return
+    }
+    await runSaveStep(async () => {
+      const res = await passkeyLogin(token, {
+        credential_id: form.value.credential_id.trim(),
+        private_key_pem: form.value.private_key_pem.trim(),
+        user_handle: form.value.user_handle.trim(),
+        account_name: form.value.account_name || undefined,
+        remark: form.value.remark || undefined,
+        proxy: form.value.proxy || undefined,
+      })
+      if (res.need_password && res.passkey_id) {
+        passkeyId.value = res.passkey_id
+        passkeyNeedPassword.value = true
+        error.value = t('addAccount.needPassword')
+        return
+      }
+      toast.success(t('addAccount.loginSuccess'))
+      emit('success')
+      handleClose()
+    }).catch((e: unknown) => {
+      error.value = getLocalizedErrorMessage(e, t) || t('addAccount.passkeyFailed')
+    })
+    return
+  }
+
   if (loginMethod.value === 'code') {
     if (!phoneCodeHash.value) {
       error.value = t('addAccount.getCodeFirst')
@@ -447,7 +531,7 @@ onUnmounted(() => {
   <Modal
     :isOpen="isOpen"
     @close="handleClose"
-    :title="loginMethod === 'code' ? t('addAccount.codeTitle') : loginMethod === 'qr' ? t('addAccount.qrTitle') : t('addAccount.importTitle')"
+    :title="loginMethod === 'code' ? t('addAccount.codeTitle') : loginMethod === 'qr' ? t('addAccount.qrTitle') : loginMethod === 'passkey' ? t('addAccount.passkeyTitle') : t('addAccount.importTitle')"
   >
     <div class="space-y-4 pb-2">
       <!-- 登录方式分段切换：普通开关按钮组（aria-pressed），
@@ -482,6 +566,16 @@ onUnmounted(() => {
         >
           <FileDown class="w-3.5 h-3.5" />
           {{ t('accounts.importSession') }}
+        </button>
+        <button
+          type="button"
+          class="ui-segment-btn"
+          :class="loginMethod === 'passkey' ? 'ui-segment-btn-active' : ''"
+          :aria-pressed="loginMethod === 'passkey'"
+          @click="loginMethod = 'passkey'"
+        >
+          <KeyRound class="w-3.5 h-3.5" />
+          {{ t('accounts.passkeyLogin') }}
         </button>
       </div>
 
@@ -626,8 +720,77 @@ onUnmounted(() => {
         </div>
       </template>
 
+      <!-- Passkey specific fields -->
+      <template v-if="loginMethod === 'passkey'">
+        <p class="text-xs text-[var(--sp-text-muted)]">{{ t('addAccount.passkeyHint') }}</p>
+        <div v-if="passkeyStatus && !passkeyStatus.passkey_available" class="ui-alert-error" role="alert">
+          {{ t('addAccount.passkeyUnavailable') }}
+        </div>
+        <div v-if="passkeyStatus && passkeyStatus.passkey_available && !passkeyStatus.api_is_custom" class="text-xs text-amber-600 dark:text-amber-400">
+          {{ t('addAccount.passkeySharedApiWarning') }}
+        </div>
+        <div class="space-y-1.5">
+          <label class="ui-label" for="add-account-credential-id">{{ t('addAccount.passkeyCredentialId') }} <span class="text-rose-500">*</span></label>
+          <input
+            id="add-account-credential-id"
+            v-model="form.credential_id"
+            type="text"
+            autocomplete="off"
+            spellcheck="false"
+            :placeholder="t('addAccount.passkeyCredentialIdPlaceholder')"
+            class="ui-input font-mono text-xs"
+          >
+        </div>
+        <div class="space-y-1.5">
+          <div class="flex items-center justify-between">
+            <label class="ui-label" for="add-account-private-key">{{ t('addAccount.passkeyPrivateKey') }} <span class="text-rose-500">*</span></label>
+            <button
+              type="button"
+              class="text-xs text-sky-600 dark:text-sky-400 hover:underline"
+              @click="showPrivateKey = !showPrivateKey"
+            >
+              {{ showPrivateKey ? t('addAccount.passkeyHideKey') : t('addAccount.passkeyShowKey') }}
+            </button>
+          </div>
+          <textarea
+            id="add-account-private-key"
+            v-model="form.private_key_pem"
+            rows="4"
+            autocomplete="off"
+            spellcheck="false"
+            :placeholder="t('addAccount.passkeyPrivateKeyPlaceholder')"
+            class="ui-input font-mono text-xs"
+            :style="privateKeyStyle"
+          ></textarea>
+        </div>
+        <div class="space-y-1.5">
+          <label class="ui-label" for="add-account-user-handle">{{ t('addAccount.passkeyUserHandle') }} <span class="text-rose-500">*</span></label>
+          <input
+            id="add-account-user-handle"
+            v-model="form.user_handle"
+            type="text"
+            autocomplete="off"
+            spellcheck="false"
+            :placeholder="t('addAccount.passkeyUserHandlePlaceholder')"
+            class="ui-input font-mono text-xs"
+          >
+        </div>
+        <!-- 2FA password, shown only after the server accepts the passkey -->
+        <div v-if="passkeyNeedPassword" class="space-y-1.5">
+          <label class="ui-label" for="add-account-passkey-2fa">{{ t('addAccount.cloudPassword') }} <span class="text-rose-500">*</span></label>
+          <input
+            id="add-account-passkey-2fa"
+            v-model="form.password"
+            type="password"
+            autocomplete="new-password"
+            :placeholder="t('addAccount.cloudPasswordPlaceholder')"
+            class="ui-input"
+          >
+        </div>
+      </template>
+
       <!-- Cloud Password (only for Code & QR) -->
-      <div v-if="loginMethod !== 'import'" class="space-y-1.5">
+      <div v-if="loginMethod === 'code' || loginMethod === 'qr'" class="space-y-1.5">
         <label class="ui-label" for="add-account-2fa">{{ t('addAccount.cloudPassword') }}</label>
         <input 
           id="add-account-2fa"

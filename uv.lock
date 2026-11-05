@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 5
 requires-python = ">=3.10, <3.14"
 
 [[package]]
@@ -1261,6 +1261,7 @@ dependencies = [
     { name = "python-multipart" },
     { name = "qrcode", extra = ["pil"] },
     { name = "sqlalchemy" },
+    { name = "telethon" },
     { name = "typing-extensions" },
     { name = "uvicorn", extra = ["standard"] },
 ]
@@ -1309,6 +1310,7 @@ requires-dist = [
     { name = "qrcode", extras = ["pil"] },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.14.6,<0.16" },
     { name = "sqlalchemy" },
+    { name = "telethon", specifier = "==1.45.0" },
     { name = "tgcrypto", marker = "extra == 'speedup'" },
     { name = "tox", marker = "extra == 'dev'", specifier = ">=4.32.0" },
     { name = "typing-extensions" },

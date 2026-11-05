@@ -19,6 +19,9 @@ classifiers = [
 dependencies = [
     # kurigram 2.2.26 原生支持 in_memory SQLiteStorage 与新版 MTProto RPC
     "kurigram==2.2.26",
+    # Fork patch: Telethon 只用于 KeePassXC 通行密钥登录
+    # (Kurigram/Pyrogram 没有 InitPasskeyLogin/FinishPasskeyLogin)
+    "telethon==1.45.0",
     "click",
     # 生产钉死 v1，避免无 lockfile 时 pip 拉到 v2 导致运行差异
     # 业务已具备 pydantic_compat，后续升级可再放宽到 <3

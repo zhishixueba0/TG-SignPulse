@@ -428,6 +428,58 @@ export const importAccountSessionFile = async (
   );
 };
 
+// ─── KeePassXC 通行密钥登录（fork 补丁） ───
+
+export interface PasskeyStatusResponse {
+  ok: boolean;
+  passkey_available: boolean;
+  telethon_version?: string | null;
+  api_is_custom: boolean;
+  proxy_supported: string[];
+}
+
+export interface PasskeyLoginRequest {
+  credential_id: string;
+  private_key_pem: string;
+  user_handle: string;
+  api_id?: number;
+  api_hash?: string;
+  proxy?: string;
+  account_name?: string;
+  remark?: string;
+  password?: string;
+}
+
+export interface PasskeyLoginResponse {
+  success?: boolean;
+  need_password?: boolean;
+  passkey_id?: string;
+  account_name?: string;
+  user_id?: number | null;
+  first_name?: string | null;
+  username?: string | null;
+  message?: string;
+  api_is_custom?: boolean;
+}
+
+export const getPasskeyStatus = (token: string) =>
+  request<PasskeyStatusResponse>("/passkey/status", {}, token);
+
+export const passkeyLogin = (token: string, data: PasskeyLoginRequest) =>
+  request<PasskeyLoginResponse>("/passkey/login", {
+    method: "POST",
+    body: JSON.stringify(data),
+  }, token, LONG_TIMEOUT_MS);
+
+export const submitPasskeyPassword = (
+  token: string,
+  data: { passkey_id: string; password: string },
+) =>
+  request<PasskeyLoginResponse>("/passkey/password", {
+    method: "POST",
+    body: JSON.stringify(data),
+  }, token, LONG_TIMEOUT_MS);
+
 // ─── 对话文件夹与论坛话题 ───
 
 export interface FolderItem {
