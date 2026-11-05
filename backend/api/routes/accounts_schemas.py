@@ -91,6 +91,9 @@ class AccountInfo(BaseModel):
     proxy_id: Optional[str] = None
     proxy_label: Optional[str] = None
     added_at: Optional[str] = None
+    # 自定义顺序（Batch 2）与暂停标志（Batch 5）
+    sort_order: Optional[int] = None
+    paused: bool = False
 
 
 class QrLoginStatusResponse(BaseModel):
@@ -185,6 +188,29 @@ class AccountUpdateRequest(BaseModel):
 
 class AccountUpdateResponse(BaseModel):
     """更新账号响应"""
+
+    success: bool
+    message: str
+    account: Optional[AccountInfo] = None
+
+
+class AccountMoveRequest(BaseModel):
+    """上移/下移请求（Batch 2）"""
+
+    direction: str  # up | down
+
+
+class AccountMoveResponse(BaseModel):
+    """上移/下移响应：到顶/到底时 moved=False 且不报错"""
+
+    success: bool
+    moved: bool
+    message: str
+    account: Optional[AccountInfo] = None
+
+
+class AccountPauseResponse(BaseModel):
+    """暂停/恢复响应"""
 
     success: bool
     message: str

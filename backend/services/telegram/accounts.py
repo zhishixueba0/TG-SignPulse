@@ -37,6 +37,7 @@ from backend.utils.tg_session import (
     load_account_session_string,
     load_session_string_file,
     set_account_identity,
+    set_account_profile,
     set_account_status,
 )
 from backend.utils.time import utc_now_iso_z
@@ -202,6 +203,9 @@ class TelegramAccountsMixin:
             "proxy_id": binding.get("proxy_id"),
             "proxy_label": binding.get("proxy_label") or binding["effective_label"],
             "added_at": profile.get("created_at"),
+            # 自定义顺序（Batch 2，None=尚未回填）与暂停标志（Batch 5）
+            "sort_order": profile.get("sort_order"),
+            "paused": bool(profile.get("paused", False)),
         }
 
     def list_accounts(self, force_refresh: bool = False) -> List[Dict[str, Any]]:
@@ -319,8 +323,26 @@ class TelegramAccountsMixin:
                         }
                     )
 
+            # 自定义顺序（Batch 2）：按 sort_order 返回；老账号缺 sort_order 时
+            # 按当前顺序（名称自然序，即回填前的服务端顺序）一次性回填 0..n-1
+            # 并落盘，此后新账号由 set_account_profile 取 max+1 追加到末尾。
+            if any(not isinstance(a.get("sort_order"), int) for a in accounts):
+                ordered = sorted(accounts, key=lambda x: natural_sort_key(x["name"]))
+                for idx, entry in enumerate(ordered):
+                    entry["sort_order"] = idx
+                    try:
+                        set_account_profile(entry["name"], sort_order=idx)
+                    except Exception as exc:
+                        logger.warning("回填账号顺序失败 %s: %s", entry["name"], exc)
+                accounts = ordered
             self._accounts_cache = sorted(
-                accounts, key=lambda x: natural_sort_key(x["name"])
+                accounts,
+                key=lambda x: (
+                    x["sort_order"]
+                    if isinstance(x.get("sort_order"), int)
+                    else 1 << 30,
+                    natural_sort_key(x["name"]),
+                ),
             )
             self._accounts_cache_ts = time.monotonic()
             return [
@@ -859,6 +881,133 @@ class TelegramAccountsMixin:
                 "checked_at": checked_at,
                 "needs_relogin": False,
             }
+
+    async def refresh_account_profile(
+        self,
+        account_name: str,
+        timeout_seconds: float = 12.0,
+    ) -> Dict[str, Any]:
+        """调 get_me 重新拉取名字/用户名/手机号/DC，更新 DB 缓存的身份字段。
+
+        复用状态检测同款取客户端路径（_build_account_client + 账号锁）；
+        会话无效时抛 ValueError("ACCOUNT_SESSION_INVALID: ...") 且不改身份
+        数据（只像状态检测一样把状态记为 invalid / needs_relogin）。
+        """
+        account_name = self._normalize_account_name(account_name)
+        if not self.account_exists(account_name):
+            raise ValueError("ACCOUNT_NOT_FOUND")
+
+        client, proxy_dict = self._build_account_client(account_name, no_updates=True)
+        await self.verify_account_proxy(account_name, proxy_dict)
+
+        timeout_seconds = max(1.0, min(float(timeout_seconds or 12.0), 30.0))
+        try:
+            # 与 check_account_status 同款：复用共享 Client，不用 async with client
+            # 主动断开正在运行中的任务连接。
+            async with acquire_account_lock_with_timeout(
+                account_name, timeout=timeout_seconds
+            ):
+                if not getattr(client, "is_connected", False):
+                    await client.connect()
+                me = await asyncio.wait_for(client.get_me(), timeout=timeout_seconds)
+        except AccountLockTimeout as e:
+            raise AccountLockTimeout("ACCOUNT_BUSY") from e
+        except Exception as e:
+            if is_invalid_session_error(e):
+                err_text = str(e) or type(e).__name__
+                set_account_status(
+                    account_name,
+                    status="invalid",
+                    message=err_text,
+                    code="ACCOUNT_SESSION_INVALID",
+                    needs_relogin=True,
+                )
+                raise ValueError(f"ACCOUNT_SESSION_INVALID: {err_text}") from e
+            raise
+
+        if me is None:
+            raise ValueError("ACCOUNT_SESSION_INVALID: get_me returned empty")
+        try:
+            set_account_identity(
+                account_name,
+                user_id=getattr(me, "id", None),
+                first_name=getattr(me, "first_name", None),
+                username=getattr(me, "username", None),
+                phone=getattr(me, "phone", None),
+            )
+        except Exception as exc:
+            logger.debug("刷新账号身份缓存失败 %s: %s", account_name, exc)
+        set_account_status(
+            account_name,
+            status="connected",
+            message="",
+            code="OK",
+            needs_relogin=False,
+        )
+        self._accounts_cache = None
+        entries = self.list_accounts(force_refresh=True)
+        for entry in entries:
+            if entry.get("name") == account_name:
+                return entry
+        raise ValueError("ACCOUNT_NOT_FOUND")
+
+    def move_account(self, account_name: str, direction: str) -> Dict[str, Any]:
+        """上移/下移：与相邻账号交换 sort_order（Batch 2）。
+
+        到顶/到底时不报错，返回 moved=False 与明确提示；成功返回更新后的条目。
+        """
+        account_name = self._normalize_account_name(account_name)
+        if direction not in ("up", "down"):
+            raise ValueError("direction must be 'up' or 'down'")
+        entries = self.list_accounts(force_refresh=True)
+        names = [str(e.get("name") or "") for e in entries]
+        if account_name not in names:
+            raise ValueError("ACCOUNT_NOT_FOUND")
+        idx = names.index(account_name)
+        neighbor_idx = idx - 1 if direction == "up" else idx + 1
+        if neighbor_idx < 0:
+            return {
+                "moved": False,
+                "message": "已经在最上面了",
+                "account": entries[idx],
+            }
+        if neighbor_idx >= len(entries):
+            return {
+                "moved": False,
+                "message": "已经在最下面了",
+                "account": entries[idx],
+            }
+        current = entries[idx]
+        neighbor = entries[neighbor_idx]
+        current_order = current.get("sort_order")
+        neighbor_order = neighbor.get("sort_order")
+        if not isinstance(current_order, int) or not isinstance(neighbor_order, int):
+            raise ValueError("ACCOUNT_ORDER_NOT_READY")
+        set_account_profile(current["name"], sort_order=neighbor_order)
+        set_account_profile(neighbor["name"], sort_order=current_order)
+        self._accounts_cache = None
+        updated = self.list_accounts(force_refresh=True)
+        for entry in updated:
+            if entry.get("name") == account_name:
+                return {"moved": True, "message": "已移动", "account": entry}
+        raise ValueError("ACCOUNT_NOT_FOUND")
+
+    def set_account_paused(self, account_name: str, paused: bool) -> Dict[str, Any]:
+        """暂停/恢复账号（Batch 5）：只改 paused 标志，不断开在线连接。
+
+        暂停语义：不参与批量检测与自动巡检、任务执行时跳过（不记失败）、
+        手动检测与健康检查照常、账号保持在线。
+        """
+        account_name = self._normalize_account_name(account_name)
+        if not self.account_exists(account_name):
+            raise ValueError("ACCOUNT_NOT_FOUND")
+        set_account_profile(account_name, paused=bool(paused))
+        self._accounts_cache = None
+        entries = self.list_accounts(force_refresh=True)
+        for entry in entries:
+            if entry.get("name") == account_name:
+                return entry
+        raise ValueError("ACCOUNT_NOT_FOUND")
 
     async def delete_account(self, account_name: str) -> bool:
         """Delete session material while respecting active account work."""

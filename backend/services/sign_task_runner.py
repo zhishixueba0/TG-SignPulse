@@ -118,6 +118,21 @@ async def _runner_check_account(state: TaskExecutionContext | Dict[str, Any]) ->
     )
     from backend.services.flood_backoff import get_flood_backoff_manager
 
+    # Batch 5：账号已暂停——跳过本次执行（不记失败、不发失败通知），
+    # 与 FloodWait 冷却跳过同一模式；手动执行同样跳过，需先恢复账号。
+    from backend.utils.tg_session import get_account_profile
+
+    if (get_account_profile(state["account_name"]) or {}).get("paused"):
+        _set_ctx(state, "account_paused", True)
+        error_msg = f"账号 {state['account_name']} 已暂停，跳过本次执行"
+        _set_ctx(state, "error_msg", error_msg)
+        task_key = state.get("task_key") or svc._task_key(
+            state["account_name"], state["task_name"]
+        )
+        _set_ctx(state, "task_key", task_key)
+        svc._append_active_log(task_key, error_msg)
+        return
+
     manager = get_flood_backoff_manager()
     is_cooling, remaining = manager.is_cooling_down(state["account_name"])
     if is_cooling:
@@ -768,6 +783,7 @@ async def _runner_send_notifications(
         not success
         and not state.get("account_invalid_detected", False)
         and not state.get("flood_wait_cooling", False)
+        and not state.get("account_paused", False)
         and state.get("task_notify_on_failure", True)
     ):
         # 失败分类在此阶段计算（run_once 的最终分类赋值在 finalize 之后，
@@ -1311,7 +1327,11 @@ async def execute_sign_task(
 
             await _runner_check_account(ctx)
 
-        if not ctx.account_invalid_detected and not ctx.flood_wait_cooling:
+        if (
+            not ctx.account_invalid_detected
+            and not ctx.flood_wait_cooling
+            and not ctx.account_paused
+        ):
             await _runner_refresh_keyword_monitor(ctx)
             await _runner_acquire_lock(ctx)
 

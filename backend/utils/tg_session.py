@@ -276,6 +276,9 @@ def get_account_profile(account_name: str) -> dict[str, Any]:
         "device_family": entry.get("device_family"),
         "device_profile": entry.get("device_profile"),
         "proxy_probe_policy": entry.get("proxy_probe_policy", "strict"),
+        # 自定义顺序（Batch 2）：None 表示老账号尚未回填，由列表接口一次性回填
+        "sort_order": entry.get("sort_order"),
+        "paused": bool(entry.get("paused", False)),
     }
 
 
@@ -296,6 +299,16 @@ def get_account_proxy(account_name: str) -> Optional[str]:
     return None
 
 
+def _next_sort_order(accounts: dict[str, Any]) -> int:
+    """新账号的自定义顺序：当前最大值 +1（追加到末尾）。"""
+    orders = [
+        entry.get("sort_order")
+        for entry in accounts.values()
+        if isinstance(entry, dict) and isinstance(entry.get("sort_order"), int)
+    ]
+    return (max(orders) + 1) if orders else 0
+
+
 def set_account_profile(
     account_name: str,
     *,
@@ -307,6 +320,8 @@ def set_account_profile(
     tags: Optional[list[str]] = None,
     device_family: Optional[str] = None,
     device_profile: Optional[dict] = None,
+    sort_order: Optional[int] = None,
+    paused: Optional[bool] = None,
 ) -> None:
     data = _load_account_store()
     accounts = data["accounts"]
@@ -314,6 +329,14 @@ def set_account_profile(
     if not isinstance(entry, dict):
         entry = {}
     _stamp_created_at(entry)
+    # 新建条目且未显式指定顺序时追加到末尾；老账号首次写入也一样
+    # （已有明确顺序的批量回填走列表接口，不在这里改写）。
+    if sort_order is not None:
+        entry["sort_order"] = int(sort_order)
+    elif not isinstance(entry.get("sort_order"), int):
+        entry["sort_order"] = _next_sort_order(accounts)
+    if paused is not None:
+        entry["paused"] = bool(paused)
     if remark is not None:
         entry["remark"] = remark.strip() if isinstance(remark, str) else remark
     if proxy is not None:

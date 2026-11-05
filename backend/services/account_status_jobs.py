@@ -69,6 +69,14 @@ def _normalize_names(account_names: Optional[List[str]]) -> List[str]:
         raise ValueError(f"单次最多检测 {MAX_ACCOUNTS} 个账号")
     if not names:
         raise ValueError("没有可检测的账号")
+    # 暂停账号不参与批量检测（Batch 5）；手动单账号检测不受影响
+    from backend.utils.tg_session import get_account_profile
+
+    names = [
+        name for name in names if not (get_account_profile(name) or {}).get("paused")
+    ]
+    if not names:
+        raise ValueError("没有可检测的账号")
     return names
 
 

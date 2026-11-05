@@ -68,6 +68,8 @@ class TaskExecutionContext:
     output_str: str = ""
     account_invalid_detected: bool = False
     flood_wait_cooling: bool = False
+    # Batch 5：账号已暂停——到点跳过本次执行，不记失败、不发失败通知
+    account_paused: bool = False
     timed_out: bool = False
     lock_acquired: bool = False
     cancelled: bool = False

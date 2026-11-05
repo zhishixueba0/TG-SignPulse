@@ -27,6 +27,9 @@ from backend.api.routes.accounts_schemas import (
     AccountInfo,
     AccountListResponse,
     AccountLogItem,
+    AccountMoveRequest,
+    AccountMoveResponse,
+    AccountPauseResponse,
     AccountStatusCheckRequest,
     AccountStatusCheckResponse,
     AccountStatusItem,
@@ -577,6 +580,14 @@ async def check_accounts_status(
             request.account_names,
             fallback_names=fallback,
         )
+        # 暂停账号不参与批量检测（Batch 5）；手动单账号检测不受影响
+        from backend.utils.tg_session import get_account_profile
+
+        names = [
+            name
+            for name in names
+            if not (get_account_profile(name) or {}).get("paused")
+        ]
         timeout_seconds = clamp_status_check_timeout(request.timeout_seconds)
         results: list[AccountStatusItem] = []
         for idx, name in enumerate(names):
@@ -1241,6 +1252,139 @@ async def update_account(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="ACCOUNT_UPDATE_FAILED",
+        )
+
+
+@router.post("/{account_name}/refresh-profile", response_model=AccountUpdateResponse)
+async def refresh_account_profile(
+    account_name: str, current_user: User = Depends(get_current_user)
+):
+    """刷新账号资料：调 get_me 重拉名字/用户名/手机号/DC 并更新缓存。
+
+    会话无效时返回 401 且不改身份数据；账号忙返回 409。
+    """
+    try:
+        account_name = validate_storage_name(account_name, field_name="account_name")
+        entry = await get_telegram_service().refresh_account_profile(account_name)
+        return AccountUpdateResponse(
+            success=True, message="账号资料已刷新", account=AccountInfo(**entry)
+        )
+    except AccountLockTimeout:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="ACCOUNT_BUSY")
+    except HTTPException:
+        raise
+    except ValueError as e:
+        detail = str(e)
+        if detail == "ACCOUNT_NOT_FOUND":
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail=detail
+            ) from e
+        if detail.startswith("ACCOUNT_SESSION_INVALID"):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED, detail=detail
+            ) from e
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=detail
+        ) from e
+    except Exception as e:
+        logger.error("刷新账号资料失败: %s", e, exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="ACCOUNT_REFRESH_FAILED",
+        )
+
+
+@router.post("/{account_name}/move", response_model=AccountMoveResponse)
+async def move_account(
+    account_name: str,
+    request: AccountMoveRequest,
+    current_user: User = Depends(get_current_user),
+):
+    """上移/下移账号（自定义顺序持久化，Batch 2）。"""
+    try:
+        account_name = validate_storage_name(account_name, field_name="account_name")
+        result = get_telegram_service().move_account(
+            account_name, (request.direction or "").strip().lower()
+        )
+        return AccountMoveResponse(
+            success=True,
+            moved=bool(result.get("moved")),
+            message=str(result.get("message") or ""),
+            account=AccountInfo(**result["account"]),
+        )
+    except HTTPException:
+        raise
+    except ValueError as e:
+        detail = str(e)
+        if detail == "ACCOUNT_NOT_FOUND":
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail=detail
+            ) from e
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=detail
+        ) from e
+    except Exception as e:
+        logger.error("移动账号失败: %s", e, exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="ACCOUNT_MOVE_FAILED",
+        )
+
+
+@router.post("/{account_name}/pause", response_model=AccountPauseResponse)
+async def pause_account(
+    account_name: str, current_user: User = Depends(get_current_user)
+):
+    """暂停账号（Batch 5）：不参与批量检测与自动巡检，任务执行时跳过；
+    手动检测与健康检查照常，账号保持在线。"""
+    try:
+        account_name = validate_storage_name(account_name, field_name="account_name")
+        entry = get_telegram_service().set_account_paused(account_name, True)
+        return AccountPauseResponse(
+            success=True, message="账号已暂停", account=AccountInfo(**entry)
+        )
+    except ValueError as e:
+        detail = str(e)
+        if detail == "ACCOUNT_NOT_FOUND":
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail=detail
+            ) from e
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=detail
+        ) from e
+    except Exception as e:
+        logger.error("暂停账号失败: %s", e, exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="ACCOUNT_PAUSE_FAILED",
+        )
+
+
+@router.post("/{account_name}/resume", response_model=AccountPauseResponse)
+async def resume_account(
+    account_name: str, current_user: User = Depends(get_current_user)
+):
+    """恢复账号（Batch 5）：重新参与批量检测与自动巡检、任务执行。"""
+    try:
+        account_name = validate_storage_name(account_name, field_name="account_name")
+        entry = get_telegram_service().set_account_paused(account_name, False)
+        return AccountPauseResponse(
+            success=True, message="账号已恢复", account=AccountInfo(**entry)
+        )
+    except ValueError as e:
+        detail = str(e)
+        if detail == "ACCOUNT_NOT_FOUND":
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail=detail
+            ) from e
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=detail
+        ) from e
+    except Exception as e:
+        logger.error("恢复账号失败: %s", e, exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="ACCOUNT_RESUME_FAILED",
         )
 
 

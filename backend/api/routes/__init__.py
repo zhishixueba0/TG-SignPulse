@@ -4,6 +4,7 @@ from backend.api.routes import (
     accounts,
     auth,
     batch,
+    chats,
     config,
     data_dict,
     events,
@@ -22,6 +23,8 @@ router = APIRouter()
 router.include_router(auth.router, prefix="/auth", tags=["auth"])
 router.include_router(user.router, prefix="/user", tags=["user"])
 router.include_router(accounts.router, prefix="/accounts", tags=["accounts"])
+# Fork patch: 聊天中心（对话列表 / 文本消息收发）。Not upstream.
+router.include_router(chats.router, prefix="/chats", tags=["chats"])
 # 旧版 /api/tasks 已移除；请使用 /sign-tasks
 router.include_router(sign_tasks_v2.router, prefix="/sign-tasks", tags=["sign-tasks"])
 router.include_router(logs.router, prefix="/logs", tags=["logs"])

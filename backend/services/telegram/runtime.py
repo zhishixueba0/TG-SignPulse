@@ -6,6 +6,7 @@ from typing import Any, Dict, List, Optional
 
 from backend.core.config import get_settings
 from backend.services.telegram.accounts import TelegramAccountsMixin
+from backend.services.telegram.chats import TelegramChatsMixin
 from backend.services.telegram.devices import TelegramDevicesMixin
 from backend.services.telegram.dialog_discovery import TelegramDialogDiscoveryMixin
 from backend.services.telegram.login_phone import TelegramPhoneLoginMixin
@@ -24,6 +25,7 @@ class TelegramService(
     TelegramPhoneLoginMixin,
     TelegramQrLoginMixin,
     TelegramDevicesMixin,
+    TelegramChatsMixin,
     TelegramDialogDiscoveryMixin,
 ):
     """Telegram 服务类（由 mixin 组合）。"""
