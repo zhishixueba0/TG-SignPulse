@@ -91,3 +91,98 @@ export function maskUserId(userId: number | string): string {
 export function compareAccountNames(a: string, b: string): number {
   return a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" })
 }
+
+/** 账号列表排序键：custom 为服务端返回的原始顺序（本次不做服务端持久化） */
+export type AccountSortKey = 'custom' | 'abnormal' | 'oldestChecked' | 'name'
+
+/** 账号列表状态筛选：受限（SpamBot）目前分不出来，见 GAP-ACCOUNTS.md */
+export type AccountStatusFilter = 'all' | 'available' | 'offline'
+
+export interface SortableAccount {
+  name: string
+  status?: string
+  raw?: { status_checked_at?: string | null; dc_id?: number | null }
+}
+
+/** 异常分层：error 最前，empty（检测中/额度提示）其次，active 最后 */
+function statusTier(status: string | undefined): number {
+  if (status === 'error') return 0
+  if (status === 'empty') return 1
+  return 2
+}
+
+/** 检测时间比较：从未检测的排最前，其余按 status_checked_at 升序（ISO 可直接比字典序） */
+function compareCheckedAt(
+  a: string | null | undefined,
+  b: string | null | undefined,
+): number {
+  if (!a && !b) return 0
+  if (!a) return -1
+  if (!b) return 1
+  if (a === b) return 0
+  return a < b ? -1 : 1
+}
+
+/** 稳定排序：比较器相等时保持原顺序 */
+function stableSort<T>(items: T[], cmp: (a: T, b: T) => number): T[] {
+  return items
+    .map((item, index) => ({ item, index }))
+    .sort((a, b) => cmp(a.item, b.item) || a.index - b.index)
+    .map(({ item }) => item)
+}
+
+export function sortAccounts<T extends SortableAccount>(
+  accounts: T[],
+  sortKey: AccountSortKey,
+): T[] {
+  switch (sortKey) {
+    case 'name':
+      return stableSort(accounts, (a, b) => compareAccountNames(a.name, b.name))
+    case 'abnormal':
+      return stableSort(
+        accounts,
+        (a, b) => statusTier(a.status) - statusTier(b.status),
+      )
+    case 'oldestChecked':
+      return stableSort(
+        accounts,
+        (a, b) => compareCheckedAt(a.raw?.status_checked_at, b.raw?.status_checked_at),
+      )
+    case 'custom':
+    default:
+      return accounts
+  }
+}
+
+/**
+ * 按状态筛选：available = 会话可用（uiStatus active），offline = 会话失效/报错
+ * （uiStatus error，需重新登录）。empty（检测中/额度提示）只在全部里出现，
+ * 因为它既不是可用也不是离线——受限的准确判定要等 SpamBot 分类（Batch 3）。
+ */
+export function filterAccountsByStatus<T extends { status?: string }>(
+  accounts: T[],
+  filter: AccountStatusFilter,
+): T[] {
+  if (filter === 'available') return accounts.filter((a) => a.status === 'active')
+  if (filter === 'offline') return accounts.filter((a) => a.status === 'error')
+  return accounts
+}
+
+/** 收集实际出现的 dc_id（去重、升序），供机房筛选下拉动态生成选项 */
+export function collectAccountDcIds<T extends { raw?: { dc_id?: number | null } }>(
+  accounts: T[],
+): number[] {
+  const ids = new Set<number>()
+  for (const a of accounts) {
+    if (typeof a.raw?.dc_id === 'number') ids.add(a.raw.dc_id)
+  }
+  return [...ids].sort((x, y) => x - y)
+}
+
+export function filterAccountsByDc<T extends { raw?: { dc_id?: number | null } }>(
+  accounts: T[],
+  dcId: number | null,
+): T[] {
+  if (dcId === null) return accounts
+  return accounts.filter((a) => a.raw?.dc_id === dcId)
+}

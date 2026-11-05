@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, computed } from 'vue'
+import { ref, onMounted, onUnmounted, computed, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { Play, FileText, Edit2, Trash2, Plus, QrCode, Phone, Zap, MonitorSmartphone, MessageCircle, CheckCircle2, Search, RefreshCw, XCircle, X, Users, FileDown, KeyRound } from 'lucide-vue-next'
+import { Play, FileText, Edit2, Trash2, Plus, QrCode, Phone, Zap, MonitorSmartphone, MessageCircle, CheckCircle2, Search, RefreshCw, XCircle, X, Users, FileDown, KeyRound, LayoutGrid, List, Eye, EyeOff } from 'lucide-vue-next'
 import {
   fetchAccountAvatar,
 } from '../lib/api'
@@ -24,12 +24,19 @@ import { devLog } from '../lib/devLog'
 import { AVATAR_FETCH_CONCURRENCY, mapPool } from '../lib/async-pool'
 import { AvatarUrlCache } from '../lib/avatar-cache'
 import {
-  compareAccountNames,
+  collectAccountDcIds,
+  filterAccountsByDc,
   filterAccountsByQuery,
+  filterAccountsByStatus,
   mapAccountInfoToUiItem,
   maskPhone,
   maskUserId,
+  sortAccounts,
+  type AccountSortKey,
+  type AccountStatusFilter,
 } from '../lib/account-list-map'
+import { copyToClipboard } from '../lib/clipboard'
+import { storageGet, storageSet } from '../lib/safe-storage'
 
 const formatDateTime = (s: string | null | undefined): string =>
   s ? s.slice(0, 16).replace('T', ' ') : ''
@@ -68,14 +75,100 @@ const officialMessagesAccountName = ref('')
 const searchQuery = ref('')
 const loadError = ref(false)
 
-const filteredAccounts = computed(() =>
-  filterAccountsByQuery(accounts.value, searchQuery.value),
-)
+/** 排序与显示方式存 localStorage；状态/机房筛选只影响本次会话 */
+const SORT_STORAGE_KEY = 'tg-signpulse-accounts-sort'
+const VIEW_STORAGE_KEY = 'tg-signpulse-accounts-view'
+const SORT_KEYS: AccountSortKey[] = ['custom', 'abnormal', 'oldestChecked', 'name']
+const readSortKey = (): AccountSortKey => {
+  const raw = storageGet(SORT_STORAGE_KEY)
+  return (SORT_KEYS as string[]).includes(raw ?? '') ? (raw as AccountSortKey) : 'custom'
+}
+const sortKey = ref<AccountSortKey>(readSortKey())
+const viewMode = ref<'card' | 'list'>(storageGet(VIEW_STORAGE_KEY) === 'list' ? 'list' : 'card')
+watch(sortKey, (v) => storageSet(SORT_STORAGE_KEY, v))
+watch(viewMode, (v) => storageSet(VIEW_STORAGE_KEY, v))
+const statusFilter = ref<AccountStatusFilter>('all')
+const dcFilter = ref<number | null>(null)
+/** 全局明文开关（仅本次会话，刷新后恢复掩码）与单卡点按显示 */
+const showAllUserIds = ref(false)
+const showAllPhones = ref(false)
+const revealedUserIds = ref<ReadonlySet<string>>(new Set())
+const revealedPhones = ref<ReadonlySet<string>>(new Set())
 
-const hasListFilters = computed(() => searchQuery.value.trim().length > 0)
+const onSortChange = (e: Event) => {
+  const v = (e.target as HTMLSelectElement).value
+  sortKey.value = (SORT_KEYS as string[]).includes(v) ? (v as AccountSortKey) : 'custom'
+}
+const onDcFilterChange = (e: Event) => {
+  const v = (e.target as HTMLSelectElement).value
+  dcFilter.value = v === '' ? null : Number(v)
+}
+
+const dcOptions = computed(() => collectAccountDcIds(accounts.value))
+
+const filteredAccounts = computed(() => {
+  const byQuery = filterAccountsByQuery(accounts.value, searchQuery.value)
+  const byStatus = filterAccountsByStatus(byQuery, statusFilter.value)
+  const byDc = filterAccountsByDc(byStatus, dcFilter.value)
+  return sortAccounts(byDc, sortKey.value)
+})
+
+const hasListFilters = computed(
+  () => searchQuery.value.trim().length > 0 || statusFilter.value !== 'all' || dcFilter.value !== null,
+)
 
 const clearListFilters = () => {
   searchQuery.value = ''
+  statusFilter.value = 'all'
+  dcFilter.value = null
+}
+
+const phoneText = (acc: AccountUiItem): string => {
+  if (!acc.raw.phone) return ''
+  return showAllPhones.value || revealedPhones.value.has(acc.id)
+    ? acc.raw.phone
+    : maskPhone(acc.raw.phone)
+}
+const userIdText = (acc: AccountUiItem): string => {
+  if (acc.raw.user_id === null || acc.raw.user_id === undefined) return ''
+  return showAllUserIds.value || revealedUserIds.value.has(acc.id)
+    ? String(acc.raw.user_id)
+    : maskUserId(acc.raw.user_id)
+}
+const copyPlain = async (text: string) => {
+  if (await copyToClipboard(text)) toast.success(t('common.copied'))
+}
+/** 点一次显示明文并复制，再点隐藏；全局明文开启时只复制 */
+const toggleRevealPhone = async (acc: AccountUiItem) => {
+  if (!acc.raw.phone) return
+  if (showAllPhones.value) {
+    await copyPlain(acc.raw.phone)
+    return
+  }
+  const next = new Set(revealedPhones.value)
+  if (next.has(acc.id)) {
+    next.delete(acc.id)
+  } else {
+    next.add(acc.id)
+    await copyPlain(acc.raw.phone)
+  }
+  revealedPhones.value = next
+}
+const toggleRevealUserId = async (acc: AccountUiItem) => {
+  if (acc.raw.user_id === null || acc.raw.user_id === undefined) return
+  const plain = String(acc.raw.user_id)
+  if (showAllUserIds.value) {
+    await copyPlain(plain)
+    return
+  }
+  const next = new Set(revealedUserIds.value)
+  if (next.has(acc.id)) {
+    next.delete(acc.id)
+  } else {
+    next.add(acc.id)
+    await copyPlain(plain)
+  }
+  revealedUserIds.value = next
 }
 
 /** 账号管理页为单一事实来源：每次调用都强制刷新（增删改/检测后保持一致） */
@@ -90,8 +183,8 @@ const loadAccounts = async () => {
       loginExpired: t('accounts.loginExpired'),
       checking: t('accounts.checking'),
     }
-    const sortedList = [...list].sort((a, b) => compareAccountNames(a.name, b.name))
-    accounts.value = sortedList.map((acc) => {
+    // 保持服务端返回的原始顺序（即排序下拉里的“自定义顺序”）；名称排序走 computed
+    accounts.value = list.map((acc) => {
       const ui = mapAccountInfoToUiItem(acc, labels)
       // 复用已加载的头像 URL，未缓存项交由 loadAvatars 补充
       const cached = avatarCache.get(acc.name)
@@ -186,6 +279,7 @@ const {
   filteredAccounts,
   searchQuery,
   loadAccounts,
+  isFiltered: hasListFilters,
 })
 
 const openEdit = (acc: AccountUiItem) => {
@@ -286,7 +380,7 @@ const goTasks = (name: string) => {
       <div class="ui-card flex flex-col sm:flex-row sm:items-center gap-3 p-3">
         <div class="text-xs text-[var(--sp-text-muted)] shrink-0">
           {{ t('accounts.total') }}：<span class="font-mono text-[var(--sp-text)] font-semibold">{{ filteredAccounts.length }}</span>
-          <span v-if="searchQuery.trim()" class="text-[var(--sp-text-muted)]"> / {{ accounts.length }}</span>
+          <span v-if="hasListFilters" class="text-[var(--sp-text-muted)]"> / {{ accounts.length }}</span>
         </div>
         <div class="relative flex-1 min-w-0 max-w-md">
           <Search class="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[var(--sp-text-muted)] pointer-events-none" />
@@ -377,6 +471,86 @@ const goTasks = (name: string) => {
           </button>
         </div>
       </div>
+      <!-- 浏览与整理：排序 / 状态筛选 / 机房筛选 / 显示方式 / 明文开关 -->
+      <div class="ui-card flex flex-wrap items-center gap-2 sm:gap-3 p-3">
+        <label class="flex items-center gap-1.5 text-xs text-[var(--sp-text-muted)]">
+          {{ t('accounts.sortLabel') }}
+          <select :value="sortKey" class="ui-input !h-8 !w-auto !text-xs" :aria-label="t('accounts.sortLabel')" @change="onSortChange">
+            <option value="custom">{{ t('accounts.sortCustom') }}</option>
+            <option value="abnormal">{{ t('accounts.sortAbnormal') }}</option>
+            <option value="oldestChecked">{{ t('accounts.sortOldestChecked') }}</option>
+            <option value="name">{{ t('accounts.sortName') }}</option>
+          </select>
+        </label>
+        <div class="flex items-center rounded-[var(--sp-radius)] border border-[var(--sp-border)] overflow-hidden" role="group" :aria-label="t('accounts.statusFilterLabel')">
+          <button
+            type="button"
+            class="px-2.5 py-1.5 text-xs cursor-pointer"
+            :class="statusFilter === 'all' ? 'bg-sky-500 text-white' : 'text-[var(--sp-text-secondary)] hover:bg-black/[0.04] dark:hover:bg-white/[0.06]'"
+            :aria-pressed="statusFilter === 'all'"
+            @click="statusFilter = 'all'"
+          >{{ t('accounts.filterAll') }}</button>
+          <button
+            type="button"
+            class="px-2.5 py-1.5 text-xs cursor-pointer border-l border-[var(--sp-border)]"
+            :class="statusFilter === 'available' ? 'bg-sky-500 text-white' : 'text-[var(--sp-text-secondary)] hover:bg-black/[0.04] dark:hover:bg-white/[0.06]'"
+            :aria-pressed="statusFilter === 'available'"
+            @click="statusFilter = 'available'"
+          >{{ t('accounts.filterAvailable') }}</button>
+          <button
+            type="button"
+            class="px-2.5 py-1.5 text-xs cursor-pointer border-l border-[var(--sp-border)]"
+            :class="statusFilter === 'offline' ? 'bg-sky-500 text-white' : 'text-[var(--sp-text-secondary)] hover:bg-black/[0.04] dark:hover:bg-white/[0.06]'"
+            :aria-pressed="statusFilter === 'offline'"
+            @click="statusFilter = 'offline'"
+          >{{ t('accounts.filterOffline') }}</button>
+        </div>
+        <label class="flex items-center gap-1.5 text-xs text-[var(--sp-text-muted)]">
+          {{ t('accounts.dcFilterLabel') }}
+          <select :value="dcFilter === null ? '' : String(dcFilter)" class="ui-input !h-8 !w-auto !text-xs" :aria-label="t('accounts.dcFilterLabel')" @change="onDcFilterChange">
+            <option value="">{{ t('accounts.dcFilterAll') }}</option>
+            <option v-for="dc in dcOptions" :key="dc" :value="String(dc)">DC {{ dc }}</option>
+          </select>
+        </label>
+        <div class="flex items-center rounded-[var(--sp-radius)] border border-[var(--sp-border)] overflow-hidden" role="group" :aria-label="t('accounts.viewModeLabel')">
+          <button
+            type="button"
+            class="p-1.5 cursor-pointer"
+            :class="viewMode === 'card' ? 'bg-sky-500 text-white' : 'text-[var(--sp-text-secondary)] hover:bg-black/[0.04] dark:hover:bg-white/[0.06]'"
+            :aria-pressed="viewMode === 'card'"
+            :title="t('accounts.viewCard')"
+            @click="viewMode = 'card'"
+          ><LayoutGrid class="w-4 h-4" /></button>
+          <button
+            type="button"
+            class="p-1.5 cursor-pointer border-l border-[var(--sp-border)]"
+            :class="viewMode === 'list' ? 'bg-sky-500 text-white' : 'text-[var(--sp-text-secondary)] hover:bg-black/[0.04] dark:hover:bg-white/[0.06]'"
+            :aria-pressed="viewMode === 'list'"
+            :title="t('accounts.viewList')"
+            @click="viewMode = 'list'"
+          ><List class="w-4 h-4" /></button>
+        </div>
+        <button
+          type="button"
+          class="ui-btn-secondary !px-2.5 !py-1.5 !text-xs inline-flex items-center gap-1 cursor-pointer"
+          :aria-pressed="showAllUserIds"
+          @click="showAllUserIds = !showAllUserIds"
+        >
+          <Eye v-if="!showAllUserIds" class="w-3.5 h-3.5" />
+          <EyeOff v-else class="w-3.5 h-3.5" />
+          {{ showAllUserIds ? t('accounts.hideAllUserIds') : t('accounts.showAllUserIds') }}
+        </button>
+        <button
+          type="button"
+          class="ui-btn-secondary !px-2.5 !py-1.5 !text-xs inline-flex items-center gap-1 cursor-pointer"
+          :aria-pressed="showAllPhones"
+          @click="showAllPhones = !showAllPhones"
+        >
+          <Eye v-if="!showAllPhones" class="w-3.5 h-3.5" />
+          <EyeOff v-else class="w-3.5 h-3.5" />
+          {{ showAllPhones ? t('accounts.hideAllPhones') : t('accounts.showAllPhones') }}
+        </button>
+      </div>
       <div v-if="filteredAccounts.length === 0" class="ui-empty !py-12">
         <FilterEmptyState
           v-if="accounts.length > 0 && hasListFilters"
@@ -386,6 +560,81 @@ const goTasks = (name: string) => {
           @action="clearListFilters"
         />
         <p v-else class="ui-empty-desc">{{ t('common.noData') }}</p>
+      </div>
+      <div v-else-if="viewMode === 'list'" class="ui-card divide-y divide-[var(--sp-border)]">
+        <div
+          v-for="acc in filteredAccounts" :key="acc.id"
+          class="flex flex-wrap items-center gap-3 px-4 py-3"
+        >
+          <div class="w-9 h-9 shrink-0 bg-[var(--sp-surface-muted)] rounded-[var(--sp-radius)] flex items-center justify-center text-xs text-[var(--sp-text-muted)] font-mono border border-[var(--sp-border)] overflow-hidden">
+            <img
+              v-if="acc.avatarUrl"
+              :src="acc.avatarUrl"
+              :alt="acc.name"
+              class="w-full h-full object-cover"
+              loading="lazy"
+              decoding="async"
+            >
+            <span v-else>{{ acc.name.substring(0, 2) }}</span>
+          </div>
+          <div class="min-w-0 flex-1">
+            <div class="flex items-center gap-2 min-w-0">
+              <span class="text-sm font-medium text-[var(--sp-text)] truncate" :title="acc.name">{{ acc.name }}</span>
+              <span
+                class="ui-badge shrink-0"
+                :class="{
+                  'ui-badge-success': acc.status === 'active',
+                  'ui-badge-warn': acc.status === 'empty',
+                  'ui-badge-error': acc.status === 'error',
+                }"
+                :title="acc.message || (acc.status === 'active' ? t('accounts.statusOk') : '')"
+              >
+                <span class="ui-badge-dot" />
+                <span class="truncate">
+                  {{ acc.status === 'active' ? t('accounts.statusOk') : (acc.message || t('accounts.statusUnknown')) }}
+                </span>
+              </span>
+            </div>
+            <div class="text-xs text-[var(--sp-text-muted)] truncate mt-0.5">
+              <span v-if="acc.raw.phone" class="font-mono cursor-pointer" :title="t('accounts.clickToReveal')" @click="toggleRevealPhone(acc)">{{ phoneText(acc) }}</span>
+              <span v-if="acc.raw.user_id !== null && acc.raw.user_id !== undefined" class="font-mono cursor-pointer" :title="t('accounts.clickToReveal')" @click="toggleRevealUserId(acc)"> · {{ userIdText(acc) }}</span>
+              <span v-if="acc.raw.dc_id !== null && acc.raw.dc_id !== undefined"> · DC {{ acc.raw.dc_id }}<template v-if="acc.raw.dc_location"> · {{ acc.raw.dc_location }}</template></span>
+              <span> · {{ proxyLineLabel(acc) }}</span>
+              <span> · {{ acc.raw.status_checked_at ? formatDateTime(acc.raw.status_checked_at) : t('accounts.neverChecked') }}</span>
+            </div>
+          </div>
+          <div class="flex items-center gap-1 shrink-0">
+            <button type="button" class="ui-btn-secondary !px-2 !py-1.5 !text-xs inline-flex items-center gap-1 cursor-pointer" :disabled="checkingAccount === acc.name" :title="t('accounts.checkStatus')" @click="handleCheck(acc.name)">
+              <span v-if="checkingAccount === acc.name" class="ui-spinner !w-3.5 !h-3.5 !border-2" />
+              <Play v-else class="w-3.5 h-3.5" />
+              <span>{{ t('accounts.check') }}</span>
+            </button>
+            <button type="button" class="ui-btn-secondary !px-2 !py-1.5 !text-xs inline-flex items-center gap-1 cursor-pointer" :title="t('accounts.viewTasks')" @click="goTasks(acc.name)">
+              <Zap class="w-3.5 h-3.5" />
+              <span>{{ t('accounts.tasks') }}</span>
+            </button>
+            <button type="button" class="ui-btn-secondary !px-2 !py-1.5 !text-xs inline-flex items-center gap-1 cursor-pointer" :title="t('accounts.viewLogs')" @click="goLogs(acc.name)">
+              <FileText class="w-3.5 h-3.5" />
+              <span>{{ t('accounts.logs') }}</span>
+            </button>
+            <button type="button" class="ui-btn-secondary !px-2 !py-1.5 !text-xs inline-flex items-center gap-1 cursor-pointer" :title="t('accounts.devices')" @click="openDevices(acc.name)">
+              <MonitorSmartphone class="w-3.5 h-3.5" />
+              <span>{{ t('accounts.devicesShort') }}</span>
+            </button>
+            <button type="button" class="ui-btn-secondary !px-2 !py-1.5 !text-xs inline-flex items-center gap-1 cursor-pointer" :title="t('accounts.officialMessages')" @click="openOfficialMessages(acc.name)">
+              <MessageCircle class="w-3.5 h-3.5" />
+              <span>{{ t('accounts.officialMessagesShort') }}</span>
+            </button>
+            <button type="button" class="ui-btn-secondary !px-2 !py-1.5 !text-xs inline-flex items-center gap-1 cursor-pointer" :title="t('accounts.edit')" @click="openEdit(acc)">
+              <Edit2 class="w-3.5 h-3.5" />
+              <span>{{ t('accounts.editBtn') }}</span>
+            </button>
+            <button type="button" class="ui-btn-secondary !px-2 !py-1.5 !text-xs inline-flex items-center gap-1 cursor-pointer !text-rose-600 dark:!text-rose-400" :title="t('accounts.deleteBtn')" @click="handleDelete(acc.name)">
+              <Trash2 class="w-3.5 h-3.5" />
+              <span>{{ t('accounts.deleteBtn') }}</span>
+            </button>
+          </div>
+        </div>
       </div>
       <div v-else class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-4">
     <div
@@ -438,11 +687,11 @@ const goTasks = (name: string) => {
         </div>
         <div v-if="acc.raw.phone" class="flex gap-1.5">
           <span class="text-[var(--sp-text-muted)] shrink-0">{{ t('accounts.phone') }}：</span>
-          <span class="text-[var(--sp-text-secondary)] font-mono truncate">{{ maskPhone(acc.raw.phone) }}</span>
+          <span class="text-[var(--sp-text-secondary)] font-mono truncate cursor-pointer" :title="t('accounts.clickToReveal')" @click="toggleRevealPhone(acc)">{{ phoneText(acc) }}</span>
         </div>
         <div v-if="acc.raw.user_id !== null && acc.raw.user_id !== undefined" class="flex gap-1.5">
           <span class="text-[var(--sp-text-muted)] shrink-0">{{ t('accounts.userId') }}：</span>
-          <span class="text-[var(--sp-text-secondary)] font-mono truncate">{{ maskUserId(acc.raw.user_id) }}</span>
+          <span class="text-[var(--sp-text-secondary)] font-mono truncate cursor-pointer" :title="t('accounts.clickToReveal')" @click="toggleRevealUserId(acc)">{{ userIdText(acc) }}</span>
         </div>
         <div v-if="acc.raw.dc_id !== null && acc.raw.dc_id !== undefined" class="flex gap-1.5">
           <span class="text-[var(--sp-text-muted)] shrink-0">{{ t('accounts.dc') }}：</span>

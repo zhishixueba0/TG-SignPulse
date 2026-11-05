@@ -22,6 +22,8 @@ export function useAccountBatchCheck(options: {
   filteredAccounts: ComputedRef<AccountUiItem[]>
   searchQuery: Ref<string>
   loadAccounts: () => Promise<void>
+  /** 任一列表筛选生效时（搜索/状态/机房），批量检测只测筛选结果 */
+  isFiltered?: ComputedRef<boolean>
 }) {
   const { t } = useI18n()
   const toast = useToast()
@@ -301,12 +303,11 @@ export function useAccountBatchCheck(options: {
   }
 
   const handleBatchCheck = async () => {
-    const source = options.searchQuery.value.trim()
-      ? options.filteredAccounts.value
-      : options.accounts.value
+    const scoped = options.searchQuery.value.trim() !== '' || options.isFiltered?.value === true
+    const source = scoped ? options.filteredAccounts.value : options.accounts.value
     const names = source.map((acc) => acc.name).filter(Boolean)
     const scopedHint =
-      options.searchQuery.value.trim() && names.length < options.accounts.value.length
+      scoped && names.length < options.accounts.value.length
         ? t('accounts.batchCheckScoped', {
             n: names.length,
             total: options.accounts.value.length,
