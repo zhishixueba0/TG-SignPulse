@@ -4,6 +4,7 @@ import Modal from '../Modal.vue'
 import AccountImpactModal from './AccountImpactModal.vue'
 import { previewAccountChange, applyAccountChange, type AccountChangePlan } from '../../lib/api/accounts'
 import { updateAccount } from '../../lib/api'
+import { listProxies, type ProxyItem, type ProxyMode } from '../../lib/api/proxies'
 import { getAuthToken } from '../../lib/api/core'
 import { useI18n } from '../../composables/useI18n'
 import { useToast } from '../../composables/useToast'
@@ -26,24 +27,53 @@ const emit = defineEmits<{
   (e: 'closed'): void
 }>()
 
+type ProxyModeOption = 'inherit' | 'direct' | 'pool' | 'custom'
+
 const form = ref({
   new_account_name: '',
   remark: '',
-  proxy: ''
+  proxyMode: 'inherit' as ProxyModeOption,
+  proxyId: '',
+  proxyUrl: '',
 })
 const loading = ref(false)
 const error = ref('')
+const poolProxies = ref<ProxyItem[]>([])
+const poolFailed = ref(false)
+
+const loadPool = async () => {
+  const token = getAuthToken()
+  if (!token) return
+  try {
+    poolFailed.value = false
+    const res = await listProxies(token)
+    poolProxies.value = res.proxies
+  } catch {
+    // 代理池加载失败：退回自由文本输入，不阻塞编辑
+    poolFailed.value = true
+    poolProxies.value = []
+  }
+}
 
 const handleClosed = () => emit('closed')
 
 watch(() => props.isOpen, (val) => {
   if (val && props.account) {
+    const raw = props.account.raw
+    const mode = raw.proxy_mode
     form.value = {
       new_account_name: props.account.name || '',
       remark: props.account.remark || '',
-      proxy: props.account.raw.proxy || ''
+      proxyMode: mode === 'inherit' || mode === 'direct' || mode === 'pool' || mode === 'custom'
+        ? mode
+        : raw.proxy
+          ? 'custom'
+          : 'inherit',
+      proxyId: raw.proxy_id || '',
+      proxyUrl: raw.proxy || '',
     }
     error.value = ''
+    void loadPool()
   }
 })
 
@@ -66,15 +96,20 @@ const handleSave = async (confirmed = false) => {
       renamePlan.value = null
       emit('success')
     }
+    // 代理线路：pool → proxy_id，custom → proxy（自由文本），inherit/direct → 两者都清空
+    const proxyMode: ProxyMode = poolFailed.value ? 'custom' : form.value.proxyMode
     await updateAccount(token, accountName, {
       new_account_name: null,
       remark: form.value.remark || null,
-      proxy: form.value.proxy || null
+      proxy_mode: proxyMode,
+      proxy_id: proxyMode === 'pool' ? (form.value.proxyId || null) : null,
+      proxy: proxyMode === 'custom' ? (form.value.proxyUrl.trim() || null) : null,
     })
     toast.success(t('editAccount.saveSuccess'))
     emit('success')
     emit('close')
   } catch (e: unknown) {
+    // 账号在线时后端返回 409：原样展示后端文案
     error.value = getLocalizedErrorMessage(e, t, t('editAccount.saveFailed'))
   } finally {
     loading.value = false
@@ -113,14 +148,49 @@ const handleSave = async (confirmed = false) => {
       </div>
 
       <div class="space-y-1.5">
-        <label class="ui-label" for="edit-account-proxy">{{ t('editAccount.proxyLabel') }}</label>
-        <input 
-          id="edit-account-proxy"
-          v-model="form.proxy"
-          type="text" 
-          placeholder="socks5://..."
-          class="ui-input"
-        >
+        <span class="ui-label">{{ t('editAccount.proxyModeLabel') }}</span>
+        <div v-if="poolFailed" class="space-y-1.5">
+          <input
+            v-model="form.proxyUrl"
+            type="text"
+            placeholder="socks5://..."
+            class="ui-input"
+          >
+          <p class="text-xs text-[var(--sp-text-muted)]">{{ t('editAccount.proxyLoadFailed') }}</p>
+        </div>
+        <div v-else class="space-y-2">
+          <label class="flex items-center gap-2 text-sm text-[var(--sp-text)] cursor-pointer">
+            <input v-model="form.proxyMode" type="radio" value="inherit" class="!w-auto">
+            {{ t('editAccount.proxyModeInherit') }}
+          </label>
+          <label class="flex items-center gap-2 text-sm text-[var(--sp-text)] cursor-pointer">
+            <input v-model="form.proxyMode" type="radio" value="direct" class="!w-auto">
+            {{ t('editAccount.proxyModeDirect') }}
+          </label>
+          <label class="flex items-center gap-2 text-sm text-[var(--sp-text)] cursor-pointer">
+            <input v-model="form.proxyMode" type="radio" value="pool" class="!w-auto" :disabled="poolProxies.length === 0">
+            {{ t('editAccount.proxyModePool') }}
+          </label>
+          <select
+            v-if="form.proxyMode === 'pool'"
+            v-model="form.proxyId"
+            class="ui-input"
+          >
+            <option value="" disabled>{{ t('editAccount.proxySelectPlaceholder') }}</option>
+            <option v-for="p in poolProxies" :key="p.id" :value="p.id">{{ p.label }} — {{ p.display_url }}</option>
+          </select>
+          <label class="flex items-center gap-2 text-sm text-[var(--sp-text)] cursor-pointer">
+            <input v-model="form.proxyMode" type="radio" value="custom" class="!w-auto">
+            {{ t('editAccount.proxyModeCustom') }}
+          </label>
+          <input
+            v-if="form.proxyMode === 'custom'"
+            v-model="form.proxyUrl"
+            type="text"
+            :placeholder="t('editAccount.proxyCustomPlaceholder')"
+            class="ui-input"
+          >
+        </div>
       </div>
     </div>
 

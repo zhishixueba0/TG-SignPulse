@@ -13,6 +13,7 @@ const router = createRouter({
       children: [
         { path: 'dashboard', name: 'dashboard', component: () => import('../views/Dashboard.vue') },
         { path: 'accounts', name: 'accounts', component: () => import('../views/Accounts.vue') },
+        { path: 'proxies', name: 'proxies', component: () => import('../views/Proxies.vue') },
         { path: 'tasks', name: 'tasks', component: () => import('../views/Tasks.vue') },
         { path: 'plugins', name: 'plugins', component: () => import('../views/Plugins.vue') },
         { path: 'logs', name: 'logs', component: () => import('../views/Logs.vue') },

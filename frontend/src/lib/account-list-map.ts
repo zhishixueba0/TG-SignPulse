@@ -46,7 +46,12 @@ export function mapAccountInfoToUiItem(
 }
 
 export function filterAccountsByQuery<
-  T extends { name: string; remark?: string | null; message?: string | null },
+  T extends {
+    name: string
+    remark?: string | null
+    message?: string | null
+    raw?: { username?: string | null; phone?: string | null }
+  },
 >(accounts: T[], searchQuery: string): T[] {
   const q = searchQuery.trim().toLowerCase()
   if (!q) return accounts
@@ -54,8 +59,33 @@ export function filterAccountsByQuery<
     (a) =>
       a.name.toLowerCase().includes(q) ||
       (a.remark || '').toLowerCase().includes(q) ||
-      (a.message || '').toLowerCase().includes(q),
+      (a.message || '').toLowerCase().includes(q) ||
+      (a.raw?.username || '').toLowerCase().includes(q) ||
+      (a.raw?.phone || '').toLowerCase().includes(q),
   )
+}
+
+/**
+ * 手机号脱敏：保留 +<国家码> 与末 2 位，中间打码。
+ * 例：+1 9295550102 → +1 929***-**02；无 + 前缀时保留前 3 位与末 2 位。
+ */
+export function maskPhone(phone: string): string {
+  const digits = phone.replace(/[^\d]/g, '')
+  if (digits.length <= 5) return phone
+  if (phone.trim().startsWith('+')) {
+    // 国家码长度 = 总长 - 10（默认按 10 位本地号码计，不足时取 1 位）
+    const ccLen = digits.length > 10 ? digits.length - 10 : 1
+    const rest = digits.slice(ccLen)
+    return `+${digits.slice(0, ccLen)} ${rest.slice(0, 3)}***-**${rest.slice(-2)}`
+  }
+  return `${digits.slice(0, 3)}***-**${digits.slice(-2)}`
+}
+
+/** 用户 ID 脱敏：保留前 3 位与后 3 位，中间打码。例：770123960 → 770***960 */
+export function maskUserId(userId: number | string): string {
+  const s = String(userId)
+  if (s.length <= 6) return s
+  return `${s.slice(0, 3)}***${s.slice(-3)}`
 }
 
 export function compareAccountNames(a: string, b: string): number {

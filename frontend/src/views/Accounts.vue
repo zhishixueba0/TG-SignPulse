@@ -27,7 +27,21 @@ import {
   compareAccountNames,
   filterAccountsByQuery,
   mapAccountInfoToUiItem,
+  maskPhone,
+  maskUserId,
 } from '../lib/account-list-map'
+
+const formatDateTime = (s: string | null | undefined): string =>
+  s ? s.slice(0, 16).replace('T', ' ') : ''
+
+/** 账号卡代理行文案：指定代理名 / 直连 / 自定义线路 / 继承全局代理 */
+const proxyLineLabel = (acc: AccountUiItem): string => {
+  const raw = acc.raw
+  if (raw.proxy_label) return raw.proxy_label
+  if (raw.proxy_mode === 'direct') return t('accounts.direct')
+  if (raw.proxy_mode === 'custom' && raw.proxy) return raw.proxy
+  return t('accounts.inheritGlobal')
+}
 
 const router = useRouter()
 const { t } = useI18n()
@@ -413,6 +427,44 @@ const goTasks = (name: string) => {
               {{ acc.status === 'active' ? t('accounts.statusOk') : (acc.message || t('accounts.statusUnknown')) }}
             </span>
           </span>
+        </div>
+      </div>
+
+      <!-- 账号信息行（raw 透传后端扩展字段；缺失的字段整行省略，注册行除外） -->
+      <div class="space-y-1 mb-4 text-xs">
+        <div class="flex gap-1.5">
+          <span class="text-[var(--sp-text-muted)] shrink-0">{{ t('accounts.idNumber') }}：</span>
+          <span class="text-[var(--sp-text-secondary)] font-mono truncate" :title="acc.name">{{ acc.name }}</span>
+        </div>
+        <div v-if="acc.raw.phone" class="flex gap-1.5">
+          <span class="text-[var(--sp-text-muted)] shrink-0">{{ t('accounts.phone') }}：</span>
+          <span class="text-[var(--sp-text-secondary)] font-mono truncate">{{ maskPhone(acc.raw.phone) }}</span>
+        </div>
+        <div v-if="acc.raw.user_id !== null && acc.raw.user_id !== undefined" class="flex gap-1.5">
+          <span class="text-[var(--sp-text-muted)] shrink-0">{{ t('accounts.userId') }}：</span>
+          <span class="text-[var(--sp-text-secondary)] font-mono truncate">{{ maskUserId(acc.raw.user_id) }}</span>
+        </div>
+        <div v-if="acc.raw.dc_id !== null && acc.raw.dc_id !== undefined" class="flex gap-1.5">
+          <span class="text-[var(--sp-text-muted)] shrink-0">{{ t('accounts.dc') }}：</span>
+          <span class="text-[var(--sp-text-secondary)] truncate">DC {{ acc.raw.dc_id }}<template v-if="acc.raw.dc_location"> · {{ acc.raw.dc_location }}</template></span>
+        </div>
+        <div class="flex gap-1.5">
+          <span class="text-[var(--sp-text-muted)] shrink-0">{{ t('accounts.registeredAt') }}：</span>
+          <span class="text-[var(--sp-text-secondary)] truncate">{{ acc.raw.added_at ? acc.raw.added_at.slice(0, 10) : t('accounts.registeredUnknown') }}</span>
+        </div>
+        <div v-if="acc.raw.tags && acc.raw.tags.length > 0" class="flex gap-1.5 items-start">
+          <span class="text-[var(--sp-text-muted)] shrink-0">{{ t('accounts.tags') }}：</span>
+          <span class="flex flex-wrap gap-1 min-w-0">
+            <span v-for="tag in acc.raw.tags" :key="tag" class="ui-badge !py-0 !px-1.5">{{ tag }}</span>
+          </span>
+        </div>
+        <div class="flex gap-1.5">
+          <span class="text-[var(--sp-text-muted)] shrink-0">{{ t('accounts.proxy') }}：</span>
+          <span class="text-[var(--sp-text-secondary)] truncate" :title="proxyLineLabel(acc)">{{ proxyLineLabel(acc) }}</span>
+        </div>
+        <div class="flex gap-1.5">
+          <span class="text-[var(--sp-text-muted)] shrink-0">{{ t('accounts.checkedAt') }}：</span>
+          <span class="text-[var(--sp-text-secondary)] truncate">{{ acc.raw.status_checked_at ? formatDateTime(acc.raw.status_checked_at) : t('accounts.neverChecked') }}</span>
         </div>
       </div>
 

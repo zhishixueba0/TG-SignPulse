@@ -12,6 +12,7 @@ from backend.api.routes import (
     ops,
     passkey,
     plugins,
+    proxies,
     semantic,
     sign_tasks_v2,
     user,
@@ -34,5 +35,7 @@ router.include_router(
 router.include_router(plugins.router, prefix="/plugins", tags=["plugins"])
 # Fork patch: KeePassXC passkey login (Telethon). Not upstream.
 router.include_router(passkey.router, prefix="/passkey", tags=["passkey"])
+# Fork patch: proxy pool + per-account routing. Not upstream.
+router.include_router(proxies.router, prefix="/proxies", tags=["proxies"])
 router.include_router(data_dict.router, prefix="/data-dict", tags=["data-dict"])
 router.include_router(semantic.router)

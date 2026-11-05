@@ -6,6 +6,7 @@ import { getAppVersion } from '../lib/api'
 import {
   LayoutDashboard,
   Users,
+  Network,
   Zap,
   Puzzle,
   Terminal,
@@ -104,6 +105,7 @@ onUnmounted(() => {
 const viewLoaders: Record<string, () => Promise<unknown>> = {
   dashboard: () => import('../views/Dashboard.vue'),
   accounts: () => import('../views/Accounts.vue'),
+  proxies: () => import('../views/Proxies.vue'),
   tasks: () => import('../views/Tasks.vue'),
   plugins: () => import('../views/Plugins.vue'),
   logs: () => import('../views/Logs.vue'),
@@ -135,6 +137,7 @@ const scheduleViewWarmup = () => {
 const navigation = [
   { id: 'dashboard', name: 'dashboard', icon: LayoutDashboard, labelKey: 'nav.dashboard' },
   { id: 'accounts', name: 'accounts', icon: Users, labelKey: 'nav.accounts' },
+  { id: 'proxies', name: 'proxies', icon: Network, labelKey: 'nav.proxies' },
   { id: 'tasks', name: 'tasks', icon: Zap, labelKey: 'nav.tasks' },
   { id: 'plugins', name: 'plugins', icon: Puzzle, labelKey: 'nav.plugins' },
   { id: 'logs', name: 'logs', icon: Terminal, labelKey: 'nav.logs' },

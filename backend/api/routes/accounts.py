@@ -1078,6 +1078,78 @@ async def update_account(
 
         actual_account_name = str(current_account.get("name") or account_name).strip()
 
+        # ---- 代理绑定变更：在线账号拒绝，先断开再换线路 ----
+        proxy_mode_to_save = request.proxy_mode
+        proxy_id_to_save = request.proxy_id
+        proxy_to_save = request.proxy
+        binding_requested = (
+            request.proxy_mode is not None
+            or request.proxy_id is not None
+            or request.proxy is not None
+        )
+        if binding_requested:
+            from backend.services.telegram.proxy_store import (
+                get_account_proxy_binding,
+                get_proxy_row,
+                is_account_online,
+            )
+            from tg_signer.core import is_account_client_active as _is_active
+
+            current_binding = get_account_proxy_binding(actual_account_name)
+            target_mode = (request.proxy_mode or current_binding["mode"]).lower()
+            target_proxy_id = request.proxy_id
+            if request.proxy_mode == "pool":
+                if not target_proxy_id:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail="指定代理时必须选择一个代理",
+                    )
+                if get_proxy_row(str(target_proxy_id)) is None:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail="所选代理不存在",
+                    )
+            elif request.proxy_mode == "custom":
+                target_proxy_id = None
+                if (
+                    not (request.proxy or "").strip()
+                    and not (current_account.get("proxy") or "").strip()
+                ):
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail="自定义线路时必须填写代理地址",
+                    )
+            elif request.proxy_mode in ("inherit", "direct"):
+                target_proxy_id = None
+                proxy_to_save = ""
+            elif request.proxy_mode is None and request.proxy is not None:
+                # 老版只传代理字符串：非空当自定义，清空当继承全局
+                target_mode = "custom" if (request.proxy or "").strip() else "inherit"
+                target_proxy_id = None
+            changed = (
+                target_mode != current_binding["mode"]
+                or (target_proxy_id or None)
+                != (current_binding.get("proxy_id") or None)
+                or (
+                    target_mode == "custom"
+                    and (request.proxy or "").strip()
+                    and (request.proxy or "").strip()
+                    != (current_account.get("proxy") or "").strip()
+                )
+            )
+            if changed and (
+                is_account_online(actual_account_name)
+                or _is_active(
+                    actual_account_name, getattr(service, "session_dir", None)
+                )
+            ):
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="账号在线时不能更换线路，请先断开连接再试",
+                )
+            proxy_mode_to_save = target_mode
+            proxy_id_to_save = target_proxy_id
+
         device_profile_to_save = None
         device_family_to_save = None
         if request.device_family is not None or request.device_profile is not None:
@@ -1120,7 +1192,9 @@ async def update_account(
         set_account_profile(
             target_account_name,
             remark=request.remark,
-            proxy=request.proxy,
+            proxy=proxy_to_save,
+            proxy_mode=proxy_mode_to_save,
+            proxy_id=proxy_id_to_save,
             tags=request.tags,
             device_family=device_family_to_save,
             device_profile=device_profile_to_save,

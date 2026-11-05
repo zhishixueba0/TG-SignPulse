@@ -202,6 +202,7 @@ def set_account_session_string(account_name: str, session_string: str) -> None:
     legacy_entry = isinstance(entry, dict)
     if not isinstance(entry, dict):
         entry = {}
+    _stamp_created_at(entry)
     # Keep legacy name-based namespaces stable for existing accounts. New
     # accounts get an immutable id so delete/recreate cannot inherit state.
     entry.setdefault("storage_id", account_name if legacy_entry else uuid.uuid4().hex)
@@ -258,6 +259,13 @@ def get_account_profile(account_name: str) -> dict[str, Any]:
     return {
         "remark": entry.get("remark"),
         "proxy": entry.get("proxy"),
+        "proxy_mode": entry.get("proxy_mode"),
+        "proxy_id": entry.get("proxy_id"),
+        "created_at": entry.get("created_at"),
+        "user_id": entry.get("user_id"),
+        "first_name": entry.get("first_name"),
+        "username": entry.get("username"),
+        "phone": entry.get("phone"),
         "status": entry.get("status"),
         "status_message": entry.get("status_message"),
         "status_code": entry.get("status_code"),
@@ -269,6 +277,15 @@ def get_account_profile(account_name: str) -> dict[str, Any]:
         "device_profile": entry.get("device_profile"),
         "proxy_probe_policy": entry.get("proxy_probe_policy", "strict"),
     }
+
+
+def _stamp_created_at(entry: dict) -> None:
+    """新账号条目第一次落盘时记一次添加时间，之后永不覆盖。
+
+    老账号没有 created_at，调用方按“未知”展示，绝不伪造。
+    """
+    if not entry.get("created_at"):
+        entry["created_at"] = utc_now_iso()
 
 
 def get_account_proxy(account_name: str) -> Optional[str]:
@@ -284,6 +301,8 @@ def set_account_profile(
     *,
     remark: Optional[str] = None,
     proxy: Optional[str] = None,
+    proxy_mode: Optional[str] = None,
+    proxy_id: Optional[str] = None,
     proxy_probe_policy: Optional[str] = None,
     tags: Optional[list[str]] = None,
     device_family: Optional[str] = None,
@@ -294,10 +313,19 @@ def set_account_profile(
     entry = accounts.get(account_name)
     if not isinstance(entry, dict):
         entry = {}
+    _stamp_created_at(entry)
     if remark is not None:
         entry["remark"] = remark.strip() if isinstance(remark, str) else remark
     if proxy is not None:
-        entry["proxy"] = proxy.strip() if isinstance(proxy, str) else proxy
+        entry["proxy"] = proxy.strip() or None if isinstance(proxy, str) else proxy
+    if proxy_mode is not None:
+        entry["proxy_mode"] = str(proxy_mode).strip().lower() or None
+        # 模式一变，proxy_id 跟着定：pool 记所选 id，其余模式清空旧 id
+        entry["proxy_id"] = (
+            str(proxy_id).strip() or None if proxy_id is not None else None
+        )
+    elif proxy_id is not None:
+        entry["proxy_id"] = str(proxy_id).strip() or None
     if tags is not None:
         entry["tags"] = [str(t).strip() for t in tags if str(t).strip()]
     if device_family is not None:
@@ -313,6 +341,81 @@ def set_account_profile(
     entry["updated_at"] = utc_now_iso()
     accounts[account_name] = entry
     _save_account_store(data)
+
+
+def set_account_identity(
+    account_name: str,
+    *,
+    user_id: Optional[int] = None,
+    first_name: Optional[str] = None,
+    username: Optional[str] = None,
+    phone: Optional[str] = None,
+) -> None:
+    """缓存一次 get_me 拿到的身份信息，供账号卡片展示用（不连 Telegram 也能读）。
+
+    只写本次拿到的非空字段，不覆盖已有的旧值；绝不伪造不存在的字段。
+    """
+    data = _load_account_store()
+    accounts = data["accounts"]
+    entry = accounts.get(account_name)
+    if not isinstance(entry, dict):
+        entry = {}
+    _stamp_created_at(entry)
+    if user_id:
+        entry["user_id"] = int(user_id)
+    if first_name:
+        entry["first_name"] = str(first_name)
+    if username:
+        entry["username"] = str(username)
+    if phone:
+        entry["phone"] = str(phone)
+    entry["updated_at"] = utc_now_iso()
+    accounts[account_name] = entry
+    _save_account_store(data)
+
+
+def get_account_session_identity(account_name: str) -> Optional[dict]:
+    """从 .session SQLite 的 sessions 表读 dc_id / user_id（只读，不连 Telegram）。
+
+    读不到（无 sessions 表、未登录）返回 None，调用方按字段缺失处理。
+    """
+    import sqlite3
+
+    session_file = get_settings().resolve_session_dir() / f"{account_name}.session"
+    if not session_file.is_file():
+        return None
+    try:
+        conn = sqlite3.connect(f"file:{session_file}?mode=ro", uri=True, timeout=5)
+    except Exception:
+        return None
+    try:
+        row = conn.execute("SELECT dc_id, user_id FROM sessions").fetchone()
+    except Exception:
+        return None
+    finally:
+        conn.close()
+    if not row:
+        return None
+    dc_id, user_id = row
+    if not user_id:
+        return None
+    return {"dc_id": int(dc_id) if dc_id is not None else None, "user_id": int(user_id)}
+
+
+# DC 位置：DC1/DC3 迈阿密，DC2/DC4 阿姆斯特丹，DC5 新加坡
+_DC_LOCATIONS = {
+    1: "美国·迈阿密",
+    3: "美国·迈阿密",
+    2: "欧洲·阿姆斯特丹",
+    4: "欧洲·阿姆斯特丹",
+    5: "新加坡",
+}
+
+
+def dc_location_label(dc_id: Optional[int]) -> Optional[str]:
+    if dc_id is None:
+        return None
+    return _DC_LOCATIONS.get(int(dc_id))
 
 
 def get_account_status(account_name: str) -> dict[str, Any]:
@@ -342,6 +445,7 @@ def set_account_status(
     entry = accounts.get(account_name)
     if not isinstance(entry, dict):
         entry = {}
+    _stamp_created_at(entry)
     entry["status"] = status
     entry["status_message"] = message or ""
     entry["status_code"] = code
@@ -532,7 +636,24 @@ def load_account_session_string(
 def resolve_effective_proxy(
     account_name: str, global_proxy: Optional[str] = None
 ) -> Optional[str]:
-    """解析账号生效代理：账号级代理优先，其次全局代理。"""
+    """解析账号生效代理：池子绑定 / 自定义 URL / 继承全局 / 直连。
+
+    绑定解析走 proxy_store 的唯一入口。显式直连、池子绑定
+    （含行被删）绝不回退全局；只有 inherit 模式才用全局代理。
+    解析异常时回退到旧的“账号字符串优先、其次全局”逻辑。
+    """
+    try:
+        from backend.services.telegram.proxy_store import get_account_proxy_binding
+
+        binding = get_account_proxy_binding(account_name)
+        if binding["mode"] in ("direct", "pool", "custom"):
+            return binding.get("effective_url")
+        # inherit：全局代理优先用传入值，其次读配置
+        if isinstance(global_proxy, str) and global_proxy.strip():
+            return global_proxy.strip()
+        return binding.get("effective_url")
+    except Exception:
+        pass
     proxy_value = get_account_proxy(account_name)
     if proxy_value:
         return proxy_value

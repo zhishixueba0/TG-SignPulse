@@ -80,6 +80,17 @@ class AccountInfo(BaseModel):
     tags: list[str] = []
     device_family: Optional[str] = None
     device_profile: Optional[Dict[str, Any]] = None
+    # 卡片富信息（离线可读，缺失留空，绝不伪造）
+    user_id: Optional[int] = None
+    dc_id: Optional[int] = None
+    dc_location: Optional[str] = None
+    phone: Optional[str] = None
+    username: Optional[str] = None
+    first_name: Optional[str] = None
+    proxy_mode: Optional[str] = None
+    proxy_id: Optional[str] = None
+    proxy_label: Optional[str] = None
+    added_at: Optional[str] = None
 
 
 class QrLoginStatusResponse(BaseModel):
@@ -145,6 +156,8 @@ class AccountUpdateRequest(BaseModel):
     new_account_name: Optional[str] = None
     remark: Optional[str] = None
     proxy: Optional[str] = None
+    proxy_mode: Optional[str] = None
+    proxy_id: Optional[str] = None
     tags: Optional[list[str]] = None
     device_family: Optional[str] = None
     device_profile: Optional[Dict[str, Any]] = None
@@ -156,6 +169,16 @@ class AccountUpdateRequest(BaseModel):
             allowed = ("desktop", "android", "macos", "ios")
             if val not in allowed:
                 raise ValueError(f"device_family must be one of {allowed}")
+            return val
+        return v
+
+    @validator("proxy_mode")
+    def validate_proxy_mode(cls, v):
+        if v is not None:
+            val = str(v).strip().lower()
+            allowed = ("inherit", "direct", "pool", "custom")
+            if val not in allowed:
+                raise ValueError(f"proxy_mode must be one of {allowed}")
             return val
         return v
 

@@ -106,6 +106,17 @@ export interface AccountInfo {
   tags?: string[];
   device_family?: string | null;
   device_profile?: DeviceProfile | null;
+  /** 代理页 / 账号卡展示用（后端 /api/accounts 扩展字段，缺失时省略对应行） */
+  user_id?: number | null;
+  dc_id?: number | null;
+  dc_location?: string | null;
+  phone?: string | null;
+  username?: string | null;
+  first_name?: string | null;
+  proxy_mode?: "inherit" | "direct" | "pool" | "custom" | string | null;
+  proxy_id?: string | null;
+  proxy_label?: string | null;
+  added_at?: string | null;
 }
 
 export interface AccountStatusCheckRequest {
@@ -293,6 +304,8 @@ export const updateAccount = (
     new_account_name?: string | null;
     remark?: string | null;
     proxy?: string | null;
+    proxy_mode?: "inherit" | "direct" | "pool" | "custom" | null;
+    proxy_id?: string | null;
     tags?: string[];
     device_family?: string | null;
     device_profile?: DeviceProfile | null;

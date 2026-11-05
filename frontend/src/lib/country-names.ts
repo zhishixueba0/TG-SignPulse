@@ -1,0 +1,106 @@
+/**
+ * 国家/地区代码 → 中文名（代理归属地展示用）。
+ * 未知代码直接显示代码本身；旗帜一律用 flagcdn 图片，绝不使用 emoji 旗帜
+ *（Windows 下 emoji 旗帜会渲染成字母）。
+ */
+export const COUNTRY_NAMES: Record<string, string> = {
+  US: "美国",
+  CN: "中国大陆",
+  IR: "伊朗",
+  DE: "德国",
+  NL: "荷兰",
+  FR: "法国",
+  GB: "英国",
+  UK: "英国",
+  JP: "日本",
+  SG: "新加坡",
+  KR: "韩国",
+  CA: "加拿大",
+  AU: "澳大利亚",
+  BR: "巴西",
+  IN: "印度",
+  IT: "意大利",
+  ES: "西班牙",
+  PL: "波兰",
+  CZ: "捷克",
+  RO: "罗马尼亚",
+  TR: "土耳其",
+  RU: "俄罗斯",
+  UA: "乌克兰",
+  VN: "越南",
+  TH: "泰国",
+  ID: "印尼",
+  MY: "马来西亚",
+  HK: "香港",
+  TW: "台湾",
+  MO: "澳门",
+  CH: "瑞士",
+  AT: "奥地利",
+  BE: "比利时",
+  SE: "瑞典",
+  NO: "挪威",
+  DK: "丹麦",
+  FI: "芬兰",
+  IE: "爱尔兰",
+  PT: "葡萄牙",
+  GR: "希腊",
+  HU: "匈牙利",
+  SK: "斯洛伐克",
+  SI: "斯洛文尼亚",
+  HR: "克罗地亚",
+  RS: "塞尔维亚",
+  BG: "保加利亚",
+  LT: "立陶宛",
+  LV: "拉脱维亚",
+  EE: "爱沙尼亚",
+  IS: "冰岛",
+  LU: "卢森堡",
+  MT: "马耳他",
+  CY: "塞浦路斯",
+  IL: "以色列",
+  AE: "阿联酋",
+  SA: "沙特",
+  EG: "埃及",
+  ZA: "南非",
+  NG: "尼日利亚",
+  KE: "肯尼亚",
+  MX: "墨西哥",
+  AR: "阿根廷",
+  CL: "智利",
+  CO: "哥伦比亚",
+  PE: "秘鲁",
+  VE: "委内瑞拉",
+  NZ: "新西兰",
+  PH: "菲律宾",
+  KH: "柬埔寨",
+  LA: "老挝",
+  MM: "缅甸",
+  BD: "孟加拉",
+  PK: "巴基斯坦",
+  LK: "斯里兰卡",
+  NP: "尼泊尔",
+  KZ: "哈萨克斯坦",
+  UZ: "乌兹别克斯坦",
+  GE: "格鲁吉亚",
+  AM: "亚美尼亚",
+  AZ: "阿塞拜疆",
+  BY: "白俄罗斯",
+  MD: "摩尔多瓦",
+  AL: "阿尔巴尼亚",
+  BA: "波黑",
+  ME: "黑山",
+  MK: "北马其顿",
+}
+
+/** 代码 → 中文名；空值返回空串，未知代码原样返回。 */
+export function countryName(code: string | null | undefined): string {
+  if (!code) return ""
+  const upper = code.toUpperCase()
+  return COUNTRY_NAMES[upper] ?? upper
+}
+
+/** flagcdn 旗帜图片地址（w40）；无代码时返回空串。 */
+export function flagImageUrl(code: string | null | undefined): string {
+  if (!code) return ""
+  return `https://flagcdn.com/w40/${code.toLowerCase()}.png`
+}

@@ -24,9 +24,11 @@ from backend.utils.names import natural_sort_key, validate_storage_name
 from backend.utils.proxy import build_proxy_dict
 from backend.utils.storage import move_storage_path
 from backend.utils.tg_session import (
+    dc_location_label,
     delete_account_session_string,
     delete_session_string_file,
     get_account_profile,
+    get_account_session_identity,
     get_account_session_string,
     get_account_status,
     get_session_mode,
@@ -34,6 +36,7 @@ from backend.utils.tg_session import (
     list_account_names,
     load_account_session_string,
     load_session_string_file,
+    set_account_identity,
     set_account_status,
 )
 from backend.utils.time import utc_now_iso_z
@@ -74,8 +77,10 @@ def _resolve_proxy_and_device_kwargs(
 
     代理字符串非法时抛出 ValueError("PROXY_INVALID_BLOCKED")，而不是静默降级为
     直连——静默降级等价于绕过全局代理策略与出口 IP 校验。
+    生效代理走 proxy_store 的绑定解析（池子绑定 / 自定义 URL /
+    继承全局 / 直连），不在此处重复拼逻辑。
     """
-    from backend.services.config import get_config_service
+    from backend.services.telegram.proxy_store import resolve_account_proxy_url
 
     try:
         profile = get_account_profile(account_name) or {}
@@ -83,9 +88,7 @@ def _resolve_proxy_and_device_kwargs(
         logger.debug("读取账号 profile 失败 %s: %s", account_name, e)
         profile = {}
 
-    proxy_value = profile.get("proxy")
-    if not proxy_value:
-        proxy_value = get_config_service().get_global_proxy()
+    proxy_value = resolve_account_proxy_url(account_name)
 
     proxy_dict = None
     if proxy_value and str(proxy_value).strip():
@@ -167,7 +170,18 @@ class TelegramAccountsMixin:
         session_size: int,
         profile: Dict[str, Any],
     ) -> Dict[str, Any]:
-        """构造账号列表条目：session 文件、profile 元数据与运行状态合并为单一 dict。"""
+        """构造账号列表条目：session 文件、profile 元数据与运行状态合并为单一 dict。
+
+        富信息字段（卡片展示用，全部离线可读，缺失就留空不伪造）：
+        user_id / dc_id 来自 .session 的 sessions 表；phone / username /
+        first_name 来自上次 get_me 成功后缓存的身份信息；added_at 是
+        面板添加时间（老账号没有，返回 None）；proxy_* 来自代理绑定。
+        """
+        from backend.services.telegram.proxy_store import get_account_proxy_binding
+
+        binding = get_account_proxy_binding(account_name)
+        identity = get_account_session_identity(account_name) or {}
+        dc_id = identity.get("dc_id")
         return {
             "name": account_name,
             "session_file": str(session_file),
@@ -178,6 +192,16 @@ class TelegramAccountsMixin:
             "tags": profile.get("tags") or [],
             "device_family": profile.get("device_family"),
             "device_profile": profile.get("device_profile"),
+            "user_id": identity.get("user_id") or profile.get("user_id"),
+            "dc_id": dc_id,
+            "dc_location": dc_location_label(dc_id),
+            "phone": profile.get("phone"),
+            "username": profile.get("username"),
+            "first_name": profile.get("first_name"),
+            "proxy_mode": binding["mode"],
+            "proxy_id": binding.get("proxy_id"),
+            "proxy_label": binding.get("proxy_label") or binding["effective_label"],
+            "added_at": profile.get("created_at"),
         }
 
     def list_accounts(self, force_refresh: bool = False) -> List[Dict[str, Any]]:
@@ -513,11 +537,11 @@ class TelegramAccountsMixin:
         profile = get_account_profile(account_name) or {}
 
         if proxy_dict is None:
-            proxy_value = profile.get("proxy")
-            if not proxy_value:
-                from backend.services.config import get_config_service
+            from backend.services.telegram.proxy_store import (
+                resolve_account_proxy_url,
+            )
 
-                proxy_value = get_config_service().get_global_proxy()
+            proxy_value = resolve_account_proxy_url(account_name)
             if proxy_value and str(proxy_value).strip():
                 proxy_dict = build_proxy_dict(str(proxy_value).strip())
                 if not proxy_dict:
@@ -697,6 +721,18 @@ class TelegramAccountsMixin:
                 code="OK",
                 needs_relogin=False,
             )
+            # 检测成功：缓存一次 get_me 身份，供账号卡片离线展示
+            if me is not None:
+                try:
+                    set_account_identity(
+                        account_name,
+                        user_id=getattr(me, "id", None),
+                        first_name=getattr(me, "first_name", None),
+                        username=getattr(me, "username", None),
+                        phone=getattr(me, "phone", None),
+                    )
+                except Exception as exc:
+                    logger.debug("缓存账号身份失败 %s: %s", account_name, exc)
             return {
                 "account_name": account_name,
                 "ok": True,

@@ -460,6 +460,15 @@ async def on_startup() -> None:
     run_migrations(get_engine())
     with get_session_local()() as db:
         ensure_admin(db)
+    # Fork patch：代理订阅同步循环（启动约 5 分钟后首轮，之后每 24 小时）。
+    try:
+        from backend.services.telegram.proxy_store import start_proxy_sync_loop
+
+        start_proxy_sync_loop()
+    except Exception:
+        logging.getLogger("backend.startup").debug(
+            "启动代理订阅同步循环失败（可忽略）", exc_info=True
+        )
     await init_scheduler(sync_on_startup=False)
 
     # Pre-export session strings from .session files to avoid SQLite locks during task execution
