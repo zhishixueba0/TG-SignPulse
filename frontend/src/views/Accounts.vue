@@ -865,7 +865,7 @@ const handleExportSession = (acc: AccountUiItem) => {
       <!-- 账号信息行（raw 透传后端扩展字段；缺失的字段整行省略，注册行除外） -->
       <div class="space-y-1 mb-4 text-xs">
         <div class="flex gap-1.5">
-          <span class="text-[var(--sp-text-muted)] shrink-0">{{ t('accounts.idNumber') }}：</span>
+          <span class="text-[var(--sp-text-muted)] shrink-0">{{ t('accounts.phoneNumber') }}：</span>
           <span v-if="acc.raw.phone" class="text-[var(--sp-text-secondary)] font-mono truncate cursor-pointer" :title="t('accounts.clickToReveal')" @click="toggleRevealPhone(acc)">{{ phoneText(acc) }}</span>
           <span v-else class="text-[var(--sp-text-secondary)] truncate">{{ t('accounts.phoneUnknown') }}</span>
         </div>

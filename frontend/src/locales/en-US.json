@@ -261,6 +261,7 @@
     "hideAllUserIds": "Hide all user IDs",
     "exportStandaloneSessionNotice": "This session was derived via the official Telegram authorization protocol with an independent AuthKey. It can be used in other tools without causing panel logout or session conflicts. Store it securely.",
     "idNumber": "ID",
+    "phoneNumber": "Phone",
     "phone": "Phone",
     "userId": "User ID",
     "dc": "DC",

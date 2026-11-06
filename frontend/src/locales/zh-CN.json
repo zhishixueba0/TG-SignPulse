@@ -261,6 +261,7 @@
     "hideAllUserIds": "隐藏全部用户 ID",
     "exportStandaloneSessionNotice": "此会话由 Telegram 官方授权协议派生，具备独立 AuthKey，可用于其他工具，不会造成面板掉线或互踢。请妥善保管。",
     "idNumber": "编号",
+    "phoneNumber": "手机号",
     "phone": "手机号",
     "userId": "用户 ID",
     "dc": "DC",
