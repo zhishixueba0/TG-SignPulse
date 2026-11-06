@@ -626,6 +626,7 @@ const handleSync = async () => {
       kept: 0,
       removed: 0,
       blocked_removed: 0,
+      telegram_failed: 0,
       started_at: null,
       finished_at: null,
     }
@@ -981,10 +982,10 @@ const saveRoute = async () => {
         <div v-if="syncJob && syncJob.status !== 'idle'" class="text-xs text-[var(--sp-text-muted)] space-y-1">
           <p v-if="syncJob.status === 'running'">
             {{ t('proxies.jobRunning', { done: syncJob.tested, total: syncJob.fetched }) }}
-            · {{ t('proxies.syncDone', { added: syncJob.added, kept: syncJob.kept, removed: syncJob.removed }) }}
+            · {{ t('proxies.syncDone', { added: syncJob.added, kept: syncJob.kept, removed: syncJob.removed, telegram_failed: syncJob.telegram_failed ?? 0 }) }}
           </p>
           <p v-else-if="syncJob.status === 'done'">
-            {{ t('proxies.syncDone', { added: syncJob.added, kept: syncJob.kept, removed: syncJob.removed }) }}
+            {{ t('proxies.syncDone', { added: syncJob.added, kept: syncJob.kept, removed: syncJob.removed, telegram_failed: syncJob.telegram_failed ?? 0 }) }}
           </p>
           <p v-else-if="syncJob.status === 'error'" class="text-rose-600 dark:text-rose-400">
             {{ t('proxies.jobError', { error: syncJob.error || '' }) }}

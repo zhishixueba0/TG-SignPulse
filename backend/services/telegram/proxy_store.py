@@ -301,6 +301,29 @@ def proxy_dict_for_row(row: Proxy) -> Optional[dict]:
     return build_proxy_dict(canonical_url(row))
 
 
+def _proxy_dict_for_candidate(cand: dict) -> Optional[dict]:
+    """从解析出的候选字典拼出探测用的 proxy dict（不写库）。
+
+    导入时用：先做 Telegram 连通探测，TCP 通但 Telegram 握手失败的
+    直接剔除，不入库。拼法与 canonical_url 一致。
+    """
+    ptype = cand["ptype"]
+    host = cand["host"]
+    port = cand["port"]
+    if ptype == "mtproto":
+        secret = cand.get("secret") or ""
+        url = f"mtproto://{urllib.parse.quote(secret, safe='')}@{host}:{port}"
+    else:
+        auth = ""
+        if cand.get("username"):
+            auth = urllib.parse.quote(str(cand["username"]), safe="")
+            if cand.get("password"):
+                auth += f":{urllib.parse.quote(str(cand['password']), safe='')}"
+            auth += "@"
+        url = f"{ptype}://{auth}{host}:{port}"
+    return build_proxy_dict(url)
+
+
 # ---------- CRUD ----------
 
 
@@ -796,6 +819,7 @@ async def run_proxy_sync() -> dict:
             "kept": 0,
             "removed": 0,
             "blocked_removed": 0,
+            "telegram_failed": 0,
             "started_at": utc_now_iso(),
             "finished_at": None,
             "error": None,
@@ -826,6 +850,37 @@ async def run_proxy_sync() -> dict:
                 return await tcp_test_async(cand["host"], cand["port"], timeout=3.0)
 
         results = await asyncio.gather(*[_test_one(c) for c in candidates])
+        # TCP 通之后，对新候选（不在池子里）再做 Telegram 连通探测；
+        # TCP 通但 Telegram 握手失败的直接剔除，不入库。已在池子里的
+        # 只按原来更新延迟，不在这里删（删死节点是“全部检测/清理”的事）。
+        from backend.utils.proxy import ProxyProbeStatus, probe_proxy_exit
+
+        async def _probe_one(cand: dict) -> bool:
+            async with sem:
+                pd = _proxy_dict_for_candidate(cand)
+                if pd is None:
+                    return False
+                try:
+                    outcome = await probe_proxy_exit(pd, force=True, manual=True)
+                    return outcome.status == ProxyProbeStatus.OK
+                except Exception:
+                    return False
+
+        new_cands = []
+        for cand, (reachable, _lat) in zip(candidates, results, strict=True):
+            key = _dedup_key(
+                cand["ptype"], cand["host"], cand["port"], cand.get("secret")
+            )
+            short_key = (cand["ptype"], cand["host"].lower(), cand["port"])
+            if not reachable or short_key in manual_short_keys or key in auto_map:
+                continue
+            new_cands.append(cand)
+        probe_ok_map: dict[int, bool] = {}
+        if new_cands:
+            probe_results = await asyncio.gather(*[_probe_one(c) for c in new_cands])
+            probe_ok_map = {
+                id(c): ok for c, ok in zip(new_cands, probe_results, strict=True)
+            }
         passed_auto_keys: set[tuple] = set()
         now = utc_now_naive()
         for cand, (reachable, latency) in zip(candidates, results, strict=True):
@@ -847,6 +902,10 @@ async def run_proxy_sync() -> dict:
                     last_tested_at=now,
                     last_test_ok=True,
                 )
+                continue
+            if not probe_ok_map.get(id(cand), False):
+                # TCP 通但 Telegram 不通：直接剔除，不入库
+                _sync_job["telegram_failed"] = _sync_job.get("telegram_failed", 0) + 1
                 continue
             try:
                 row = create_proxy(

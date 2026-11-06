@@ -88,7 +88,14 @@ def test_proxies_crud_and_list_hides_secrets(client: TestClient):
     assert client.get("/api/proxies", headers=headers).json()["total"] == 0
 
 
-def test_proxies_import_and_mtproto_validation(client: TestClient):
+def test_proxies_import_and_mtproto_validation(client: TestClient, monkeypatch):
+    # 导入时做 Telegram 探测：测试环境没有真实网络，用 mock 让探测通过。
+    from backend.utils.proxy import ProxyProbeOutcome, ProxyProbeStatus
+
+    async def _probe_ok(*args, **kwargs):
+        return ProxyProbeOutcome(status=ProxyProbeStatus.OK, detail="ok", code="OK")
+
+    monkeypatch.setattr("backend.utils.proxy.probe_proxy_exit", _probe_ok)
     headers = _login(client)
     resp = client.post(
         "/api/proxies/import",
@@ -104,6 +111,7 @@ def test_proxies_import_and_mtproto_validation(client: TestClient):
     body = resp.json()
     assert body["added"] == 2
     assert body["skipped"] == 2  # 重复行 + 无效行
+    assert body["telegram_failed"] == 0
 
     # MTProto 不带 secret 拒绝
     resp = client.post(
@@ -112,6 +120,31 @@ def test_proxies_import_and_mtproto_validation(client: TestClient):
         headers=headers,
     )
     assert resp.status_code == 400
+
+
+def test_proxies_import_rejects_telegram_unreachable(client: TestClient, monkeypatch):
+    # TCP 通但 Telegram 握手失败的，导入时直接剔除，不入库。
+    from backend.utils.proxy import ProxyProbeOutcome, ProxyProbeStatus
+
+    async def _probe_fail(*args, **kwargs):
+        return ProxyProbeOutcome(
+            status=ProxyProbeStatus.UNAVAILABLE,
+            detail="handshake failed",
+            code="PROXY_PROBE_UNAVAILABLE",
+        )
+
+    monkeypatch.setattr("backend.utils.proxy.probe_proxy_exit", _probe_fail)
+    headers = _login(client)
+    resp = client.post(
+        "/api/proxies/import",
+        json={"text": "socks5://user:pass@1.2.3.4:1080\n"},
+        headers=headers,
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["added"] == 0
+    assert body["telegram_failed"] == 1
+    assert client.get("/api/proxies", headers=headers).json()["total"] == 0
 
 
 def test_proxies_routes_and_global(client: TestClient):

@@ -454,7 +454,7 @@
     "syncStarted": "Sync started",
     "syncFailed": "Sync failed",
     "syncAlreadyRunning": "Sync is already running",
-    "syncDone": "Sync done: {added} added, {kept} kept, {removed} removed",
+    "syncDone": "Sync done: {added} added, {kept} kept, {removed} removed, {telegram_failed} failed Telegram check",
     "testAllStarted": "Test started",
     "testAllDone": "Test done: {ok} OK / {fail} down",
     "testAllFailed": "Failed to start test",

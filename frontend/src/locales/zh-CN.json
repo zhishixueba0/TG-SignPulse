@@ -454,7 +454,7 @@
     "syncStarted": "同步已开始",
     "syncFailed": "同步失败",
     "syncAlreadyRunning": "同步已在进行中",
-    "syncDone": "同步完成：新增 {added} 条，保留 {kept} 条，移除 {removed} 条",
+    "syncDone": "同步完成：新增 {added} 条，保留 {kept} 条，移除 {removed} 条，Telegram 不通 {telegram_failed} 条",
     "testAllStarted": "检测已开始",
     "testAllDone": "检测完成：{ok} 通 / {fail} 不通",
     "testAllFailed": "检测启动失败",

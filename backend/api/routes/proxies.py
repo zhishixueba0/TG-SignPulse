@@ -138,6 +138,8 @@ async def import_proxies(
     request: ProxyImportRequest, current_user: User = Depends(get_current_user)
 ):
     from backend.services.telegram.proxy_parse import parse_proxy_lines
+    from backend.services.telegram.proxy_store import _proxy_dict_for_candidate
+    from backend.utils.proxy import ProxyProbeStatus, probe_proxy_exit
 
     text = request.text or ""
     parsed = parse_proxy_lines(text)
@@ -145,8 +147,32 @@ async def import_proxies(
     # （整段 base64 订阅一块可解出多条，负数按 0 算）
     raw_lines = [line for line in text.splitlines() if line.strip()]
     skipped = max(0, len(raw_lines) - len(parsed))
+    # 导入时做 Telegram 连通探测：TCP 通但 Telegram 握手失败的直接剔除，
+    # 不入库。force=True 拿 fresh 结果，manual=True 不计入熔断。
+    telegram_failed = 0
+    if parsed:
+        sem = asyncio.Semaphore(10)
+
+        async def _probe_one(cand: dict) -> bool:
+            async with sem:
+                pd = _proxy_dict_for_candidate(cand)
+                if pd is None:
+                    return False
+                try:
+                    outcome = await probe_proxy_exit(pd, force=True, manual=True)
+                    return outcome.status == ProxyProbeStatus.OK
+                except Exception:
+                    return False
+
+        probe_ok = await asyncio.gather(*[_probe_one(c) for c in parsed])
+    else:
+        probe_ok = []
     added_ids: list[str] = []
-    for cand in parsed:
+    for cand, ok in zip(parsed, probe_ok, strict=True):
+        if not ok:
+            telegram_failed += 1
+            skipped += 1
+            continue
         try:
             row = proxy_store.create_proxy(
                 ptype=cand["ptype"],
@@ -170,8 +196,9 @@ async def import_proxies(
         "added": len(added_ids),
         "skipped": skipped,
         "blocked": 0,
+        "telegram_failed": telegram_failed,
         "added_ids": added_ids,
-        "message": f"已添加 {len(added_ids)} 条，跳过 {skipped} 条（重复或无效）",
+        "message": f"已添加 {len(added_ids)} 条，跳过 {skipped} 条（重复、无效或 Telegram 不通）",
     }
 
 

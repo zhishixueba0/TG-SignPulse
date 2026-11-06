@@ -68,6 +68,7 @@ export interface ImportProxiesResponse {
   added: number
   skipped: number
   blocked: number
+  telegram_failed?: number
   added_ids: string[]
 }
 
@@ -129,6 +130,7 @@ export interface ProxySyncJobProgress {
   kept: number
   removed: number
   blocked_removed: number
+  telegram_failed: number
   error?: string | null
   started_at: string | null
   finished_at: string | null

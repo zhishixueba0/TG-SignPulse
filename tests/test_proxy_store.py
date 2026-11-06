@@ -247,6 +247,11 @@ async def test_sync_skips_invalid_mtproto_secret(memory_session_local, monkeypat
     async def fake_tcp(host, port, timeout=3.0):
         return (True, 10)
 
+    async def fake_probe(*args, **kwargs):
+        from backend.utils.proxy import ProxyProbeOutcome, ProxyProbeStatus
+
+        return ProxyProbeOutcome(status=ProxyProbeStatus.OK, detail="ok", code="OK")
+
     async def fake_enrich(proxy_id):
         return {}
 
@@ -255,6 +260,7 @@ async def test_sync_skips_invalid_mtproto_secret(memory_session_local, monkeypat
 
     monkeypatch.setattr(proxy_store, "_fetch_subscription_text", fake_fetch)
     monkeypatch.setattr(proxy_store, "tcp_test_async", fake_tcp)
+    monkeypatch.setattr("backend.utils.proxy.probe_proxy_exit", fake_probe)
     monkeypatch.setattr(proxy_store, "enrich_proxy", fake_enrich)
     monkeypatch.setattr(proxy_store, "enrich_unknown_proxies", fake_enrich_unknown)
 
