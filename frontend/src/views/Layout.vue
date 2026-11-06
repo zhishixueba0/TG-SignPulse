@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
+import { ref, computed, onMounted, onUnmounted, onErrorCaptured, watch, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { getAuthToken } from '../lib/api/core'
 import { getAppVersion } from '../lib/api'
@@ -22,6 +22,7 @@ import {
 } from 'lucide-vue-next'
 import { useTheme } from '../composables/useTheme'
 import { useI18n } from '../composables/useI18n'
+import { useToast } from '../composables/useToast'
 import { lockBodyScroll, unlockBodyScroll } from '../lib/body-scroll-lock'
 import UserProfileModal from '../components/settings/UserProfileModal.vue'
 import { devLog } from '../lib/devLog'
@@ -31,9 +32,42 @@ const route = useRoute()
 const router = useRouter()
 const { isDark, toggleTheme } = useTheme()
 const { locale, toggleLanguage, t } = useI18n()
+const toast = useToast()
 const isMobileMenuOpen = ref(false)
 const showProfileModal = ref(false)
 const sidebarVersion = ref('')
+
+// 子页面渲染错误边界：子页面 setup/render 抛错时 router.onError 接不住，
+// 没有边界会整片空白。这里捕获后显示错误卡片（带原文案 + 重试），
+// 不再静默空白；返回 false 阻止继续冒泡到全局 handler，避免重复上报。
+const viewError = ref<string | null>(null)
+const viewKey = ref(0)
+onErrorCaptured((err: unknown) => {
+  const message = err instanceof Error ? err.message : String(err ?? '')
+  viewError.value = message || 'Unknown error'
+  // 生产构建 devLog 默认静默，这里必须直接写 console，否则线上看不到。
+  // eslint-disable-next-line no-console
+  console.error('[SignPulse] 子页面渲染失败', err)
+  toast.error(t('common.viewRenderFailed'))
+  return false
+})
+
+// 切到其他页面时清掉旧的渲染错误，让新页面正常挂载。
+watch(
+  () => route.name,
+  () => {
+    viewError.value = null
+  },
+)
+
+const retryView = () => {
+  viewError.value = null
+  viewKey.value += 1
+}
+
+const reloadPage = () => {
+  window.location.reload()
+}
 const menuButtonRef = ref<HTMLButtonElement | null>(null)
 const drawerCloseButtonRef = ref<HTMLButtonElement | null>(null)
 
@@ -298,9 +332,17 @@ const handleNavClick = () => {
 
       <!-- 避免 overflow-x-hidden 破坏子元素 sticky；用 clip 裁剪即可 -->
       <div class="flex-1 px-4 sm:px-6 lg:px-8 py-6 pb-14 overflow-x-clip">
-        <router-view v-slot="{ Component }">
+        <div v-if="viewError" class="ui-card p-5 space-y-3">
+          <p class="text-sm font-medium text-[var(--sp-text)]">{{ t('common.viewRenderFailed') }}</p>
+          <p class="text-xs text-[var(--sp-text-muted)] break-words font-mono">{{ viewError }}</p>
+          <div class="flex flex-wrap gap-2">
+            <button type="button" class="ui-btn-primary !px-3 !py-2 !text-xs cursor-pointer" @click="retryView">{{ t('common.retry') }}</button>
+            <button type="button" class="ui-btn-secondary !px-3 !py-2 !text-xs cursor-pointer" @click="reloadPage">{{ t('common.reloadPage') }}</button>
+          </div>
+        </div>
+        <router-view v-else v-slot="{ Component }">
           <transition name="fade" mode="out-in">
-            <component :is="Component" />
+            <component :is="Component" :key="viewKey" />
           </transition>
         </router-view>
       </div>

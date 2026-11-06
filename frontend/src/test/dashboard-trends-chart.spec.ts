@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import DashboardTrendsChart from '../components/dashboard/DashboardTrendsChart.vue'
+import { getHistoryTrends } from '../lib/api'
 
 vi.mock('../lib/api', () => ({
   getHistoryTrends: vi.fn().mockResolvedValue({
@@ -44,5 +45,19 @@ describe('DashboardTrendsChart', () => {
     expect(wrapper.text()).toContain('90%') // overall_success_rate
     expect(wrapper.find('svg').exists()).toBe(true)
     expect(wrapper.text()).toContain('timeout: 1')
+  })
+
+  it('响应缺 trends 数组时显示空态，不抛错', async () => {
+    // 旧代码 v-else-if="!trendsData || trendsData.trends.length === 0"
+    // 在 trends 缺失时抛错（Cannot read properties of undefined），整页空白。
+    vi.mocked(getHistoryTrends).mockResolvedValueOnce({} as never)
+    const wrapper = mount(DashboardTrendsChart)
+    // 等待 onMounted 中的异步请求
+    await new Promise((r) => setTimeout(r, 50))
+    await wrapper.vm.$nextTick()
+
+    expect(wrapper.text()).toContain('暂无近 7 天签到数据')
+    // 空态下不应出现趋势折线图（图表 svg 用 w-full，空态的 Calendar 图标是 w-8）
+    expect(wrapper.find('svg.w-full').exists()).toBe(false)
   })
 })

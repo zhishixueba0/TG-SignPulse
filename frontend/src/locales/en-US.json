@@ -1652,6 +1652,8 @@
     "retry": "Retry",
     "retryHint": "Check your network and try again",
     "loadFailed": "Failed to load",
+    "viewRenderFailed": "Page failed to render",
+    "reloadPage": "Reload page",
     "search": "Search",
     "searchPlaceholder": "Search…",
     "filterNoResults": "No matching results",

@@ -153,7 +153,7 @@ const hoveredPoint = computed(() => {
       <div class="ui-skeleton h-36 w-full rounded-[var(--sp-radius)]" />
     </div>
 
-    <div v-else-if="!trendsData || trendsData.trends.length === 0" class="ui-empty !py-8">
+    <div v-else-if="!trendsData?.trends?.length" class="ui-empty !py-8">
       <Calendar class="w-8 h-8 mx-auto text-[var(--sp-text-muted)] mb-2 opacity-50" />
       <p class="ui-empty-desc">暂无近 {{ selectedDays }} 天签到数据</p>
     </div>
