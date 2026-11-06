@@ -1649,7 +1649,7 @@
     "deviceFamilyIos": "iOS",
     "devicePresetRandom": "随机（该设备族内任选）",
     "deviceLoadFailed": "设备预设加载失败，无法修改指纹",
-    "deviceOfflineHint": "修改设备指纹需先断开连接，保存后重新连接生效"
+    "deviceOfflineHint": "保存后下次连接时生效；若正好在跑检测会提示稍后再试"
   },
   "common": {
     "cancel": "取消",

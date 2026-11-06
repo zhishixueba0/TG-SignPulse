@@ -1649,7 +1649,7 @@
     "deviceFamilyIos": "iOS",
     "devicePresetRandom": "Random (any preset in this family)",
     "deviceLoadFailed": "Failed to load device presets",
-    "deviceOfflineHint": "Disconnect the account first; the new fingerprint applies on next connect"
+    "deviceOfflineHint": "Applies on next connect; if a check is running you will be asked to retry"
   },
   "common": {
     "cancel": "Cancel",
