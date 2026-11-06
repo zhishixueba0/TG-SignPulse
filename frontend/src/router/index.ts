@@ -48,14 +48,24 @@ const router = createRouter({
   ]
 })
 
-router.beforeEach((to) => {
+router.beforeEach((to, from) => {
+  // 2026-11-06 导航诊断：生产构建 devLog 静默，直接写 console，定位空白卡在哪一步。
+  // eslint-disable-next-line no-console
+  console.info('[SignPulse:nav] before', String(from.name ?? ''), '->', String(to.name ?? ''))
   const authStore = useAuthStore()
   return resolveAuthRedirect(typeof to.name === 'string' ? to.name : null, authStore)
+})
+
+router.afterEach((to, from) => {
+  // eslint-disable-next-line no-console
+  console.info('[SignPulse:nav] after', String(from.name ?? ''), '->', String(to.name ?? ''))
 })
 
 // chunk 加载失败（部署后旧 chunk 文件名已不存在）时硬刷新一次取新版入口，
 // 避免导航失败后页面空白卡死；60 秒内只刷新一次，防循环。
 router.onError((error) => {
+  // eslint-disable-next-line no-console
+  console.error('[SignPulse:nav] router error', error)
   if (isChunkLoadError(error)) {
     reloadOnceForChunkError()
   }

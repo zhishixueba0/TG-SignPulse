@@ -126,7 +126,9 @@ onMounted(() => {
   window.addEventListener('keydown', onKeydown)
   mobileQuery.addEventListener('change', onViewportChange)
   void loadSidebarVersion()
-  scheduleViewWarmup()
+  // 2026-11-06: idle warmup 已停用（并发预载 8 个 chunk，任一 import 挂起会被
+  // 路由复用同一 pending promise，导致导航确认后组件不挂载而空白）。
+  // hover/focus/pointerdown 的单页预载保留，首次跳转改为按需加载。
 })
 onUnmounted(() => {
   window.removeEventListener('keydown', onKeydown)
@@ -148,26 +150,13 @@ const viewLoaders: Record<string, () => Promise<unknown>> = {
   settings: () => import('../views/Settings.vue'),
 }
 
-const { prefetch: prefetchLoadedView, warmup: warmupAllViews } = createViewPrefetcher(viewLoaders, {
+const { prefetch: prefetchLoadedView } = createViewPrefetcher(viewLoaders, {
   warn: (name, error) => devLog.warn('页面预加载失败', { name, error }),
 })
 
 const prefetchView = (name: string) => {
   if (route.name === name) return
   prefetchLoadedView(name)
-}
-
-// 首屏渲染完成后在空闲期预热全部视图 chunk：
-// 触屏与键盘用户不会触发 hover/focus 预载，这里兜底保证首次跳转无需等待 chunk 下载
-let viewWarmupDone = false
-const scheduleViewWarmup = () => {
-  if (viewWarmupDone) return
-  viewWarmupDone = true
-  if (typeof window.requestIdleCallback === 'function') {
-    window.requestIdleCallback(() => warmupAllViews(), { timeout: 3000 })
-  } else {
-    window.setTimeout(warmupAllViews, 1500)
-  }
 }
 
 const navigation = [
@@ -341,7 +330,16 @@ const handleNavClick = () => {
           </div>
         </div>
         <router-view v-else v-slot="{ Component }">
-          <transition name="fade" mode="out-in">
+          <!-- 2026-11-06: 去掉 mode="out-in"。out-in 会等旧组件 leave 完成才挂载新组件，
+               一旦 leave 卡住新页面就永远不挂载（空白、无报错、刷新才恢复）。
+               默认并行模式新组件立即挂载，旧组件同时淡出，不再互相阻塞。
+               @after-enter/@after-leave 只写 console 诊断，线上出问题能定位到哪一步。 -->
+          <transition
+            name="fade"
+            @before-enter="() => console.info('[SignPulse:nav] enter', String(route.name))"
+            @after-enter="() => console.info('[SignPulse:nav] entered', String(route.name))"
+            @after-leave="() => console.info('[SignPulse:nav] left', String(route.name))"
+          >
             <component :is="Component" :key="viewKey" />
           </transition>
         </router-view>
