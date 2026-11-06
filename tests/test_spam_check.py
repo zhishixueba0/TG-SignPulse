@@ -64,6 +64,23 @@ class TestClassifySpamReply:
         status, _ = classify_spam_reply("")
         assert status == "unknown"
 
+    def test_real_limited_reply_with_greeting_is_limited(self):
+        # 真实回复（2026-11-06，账号 12098814721）：开头是问候语，第二段
+        # "I'm very sorry" 只是客套，标志词 "Unfortunately" 在后面。
+        # 绝不能把客套的 sorry 当成全限制，也不能只靠 limit 兜底。
+        status, _ = classify_spam_reply(
+            "Hello Nora Hutton!\n\n"
+            "I’m very sorry that you had to contact me. Unfortunately, "
+            "some actions can trigger a harsh response from our anti-spam "
+            "systems. If you think your account was limited by mistake, "
+            "you can submit a complaint to our moderators.\n\n"
+            "While the account is limited, you will not be able to send "
+            "messages to people who do not have your number in their phone "
+            "contacts or add them to groups and channels. Of course, when "
+            "people contact you first, you can always reply to them."
+        )
+        assert status == "limited"
+
     def test_unrelated_text_is_unknown(self):
         status, _ = classify_spam_reply("Hello, how can I help you?")
         assert status == "unknown"
@@ -100,14 +117,14 @@ class TestExtractUntil:
 
 
 class FakeMessage:
-    def __init__(self, text, out=False, date=None):
+    def __init__(self, text, outgoing=False, date=None):
         self.text = text
-        self.out = out
+        self.outgoing = outgoing
         self.date = date
 
 
 class FakeClient:
-    """模拟 Telethon 客户端：send_message 发 /start，get_messages 返回预设回复。"""
+    """模拟 Pyrogram 客户端：send_message 发 /start，get_chat_history 返回预设回复。"""
 
     def __init__(self, replies):
         self.replies = replies
@@ -116,16 +133,20 @@ class FakeClient:
 
     async def send_message(self, peer, text):
         now = datetime.now(timezone.utc)
-        self.sent = FakeMessage(text, out=True, date=now)
+        self.sent = FakeMessage(text, outgoing=True, date=now)
         return self.sent
 
-    async def get_messages(self, peer, limit=5):
+    async def get_chat_history(self, peer, limit=5):
         self.calls += 1
         # 第 1 轮还没回复，第 2 轮 SpamBot 回了
         if self.calls < 2:
-            return [self.sent]
-        reply = FakeMessage(self.replies, out=False, date=datetime.now(timezone.utc))
-        return [reply, self.sent]
+            yield self.sent
+            return
+        reply = FakeMessage(
+            self.replies, outgoing=False, date=datetime.now(timezone.utc)
+        )
+        yield reply
+        yield self.sent
 
 
 class TestFetchSpambotReply:

@@ -5,14 +5,18 @@
 
 分类规则（James 2026-11-05 实测 + 2026-11-06 确认，开头优先）：
 - free as a bird / no limits / good news → free（正常，无限制）
-- Unfortunately 开头 → limited（部分双向，只能给特定区域的用户随意互发）
+- Unfortunately → limited（部分双向，只能给特定区域的用户随意互发）
 - Sorry / I'm sorry 开头 → banned（双向，必须是双向联系人才可以互发）
 - blocked / banned / terminated / 被封 → banned
 - 含 limit / 限制 → limited（兜底）
 - 其他 → unknown
 
-开头优先的原因：Sorry 开头的全限制回复里也可能出现 limit 这个词，
-先按 limit 判会错判成 partial。
+注意：真实 SpamBot 回复开头常带问候语（"Hello {name}!"），"Unfortunately"
+可能在第二段、"I'm very sorry" 只是客套（"很抱歉让你来找我"），所以：
+- "unfortunately" 按全文匹配（部分限制的标志词），且在 "sorry" 之前检查——
+  部分限制的回复里同时有 "I'm very sorry" 和 "Unfortunately"，先按 sorry
+  判会错判成全限制；
+- "sorry" 只看去掉问候语后的开头，避免把客套的 "I'm very sorry" 当成全限制。
 
 只和官方 @SpamBot 对话，不给任何陌生人发消息。get_me / UserFull 里
 没有 spam 限制字段，MTProto 也没有只读的限制查询接口，@SpamBot 是
@@ -51,15 +55,12 @@ def classify_spam_reply(text: str) -> tuple[str, str]:
     - summary: 简短中文说明
     """
     low = (text or "").lower()
+    # 去掉开头的问候语段落（"Hello {name}!"），分类看后面的正文开头。
     stripped = low.strip()
-    if stripped.startswith("unfortunately"):
-        return "limited", "部分双向：只能给特定区域的用户随意互发"
-    if (
-        stripped.startswith("sorry")
-        or stripped.startswith("i'm sorry")
-        or stripped.startswith("i am sorry")
-    ):
-        return "banned", "双向：必须是双向联系人才可以互发"
+    if stripped.startswith("hello"):
+        parts = stripped.split("\n\n", 1)
+        if len(parts) == 2:
+            stripped = parts[1].strip()
     if (
         "no limits" in low
         or "free as a bird" in low
@@ -67,6 +68,16 @@ def classify_spam_reply(text: str) -> tuple[str, str]:
         or "没有限制" in (text or "")
     ):
         return "free", "正常：无限制"
+    # "unfortunately" 全文匹配且先于 sorry：部分限制回复里同时有
+    # "I'm very sorry"（客套）和 "Unfortunately"（标志词）。
+    if "unfortunately" in low:
+        return "limited", "部分双向：只能给特定区域的用户随意互发"
+    if (
+        stripped.startswith("sorry")
+        or stripped.startswith("i'm sorry")
+        or stripped.startswith("i am sorry")
+    ):
+        return "banned", "双向：必须是双向联系人才可以互发"
     if (
         "blocked" in low
         or "banned" in low
@@ -126,6 +137,10 @@ async def fetch_spambot_reply(client: Any) -> str:
 
     跳过自己发出的消息、跳过发送时间之前的旧消息。
     16 秒内无回复返回空串。
+
+    注意：fork 用 Pyrogram（Kurigram），取历史用 get_chat_history
+    （异步生成器），不是 Telethon 的 get_messages(limit=)；判断
+    发出方用 Message.outgoing，不是 Telethon 的 Message.out。
     """
     sent = await client.send_message(SPAMBOT_USERNAME, "/start")
     send_time = getattr(sent, "date", None)
@@ -133,12 +148,19 @@ async def fetch_spambot_reply(client: Any) -> str:
     for _ in range(FETCH_MAX_ROUNDS):
         await asyncio.sleep(FETCH_POLL_SECONDS)
         try:
-            msgs = await client.get_messages(SPAMBOT_USERNAME, limit=5)
+            msgs = []
+            async for m in client.get_chat_history(SPAMBOT_USERNAME, limit=5):
+                msgs.append(m)
         except Exception as exc:
             logger.debug("读取 SpamBot 回复失败 %s: %s", SPAMBOT_USERNAME, exc)
             continue
         for m in msgs:
-            if getattr(m, "out", False):
+            # Pyrogram: Message.outgoing；Telethon: Message.out
+            if hasattr(m, "outgoing"):
+                is_out = bool(m.outgoing)
+            else:
+                is_out = bool(getattr(m, "out", False))
+            if is_out:
                 continue
             m_date = getattr(m, "date", None)
             if m_date and send_time and m_date < send_time:
