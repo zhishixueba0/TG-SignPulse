@@ -329,6 +329,7 @@
     "moveTopReached": "已经在最上面了",
     "moveUp": "上移",
     "nameRemarkProxy": "名称、备注与代理",
+    "deviceFingerprint": "设备指纹",
     "pauseAccount": "暂停使用",
     "pauseAccountConfirmMessage": "暂停后该账号不参与批量检测与自动巡检，任务执行时跳过且不记失败；手动检测与健康检查照常，账号保持在线。随时可以恢复使用。",
     "pauseAccountConfirmTitle": "暂停使用账号",

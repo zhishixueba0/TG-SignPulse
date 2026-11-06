@@ -330,6 +330,15 @@ const {
 
 const openEdit = (acc: AccountUiItem) => {
   editingAccount.value = acc
+  editFocusSection.value = null
+  showEditModal.value = true
+}
+
+/** 卡片「···」菜单「设备指纹」直达：打开编辑弹窗并定位到指纹区 */
+const editFocusSection = ref<string | null>(null)
+const openEditDevice = (acc: AccountUiItem) => {
+  editingAccount.value = acc
+  editFocusSection.value = 'device'
   showEditModal.value = true
 }
 
@@ -351,6 +360,7 @@ const handleRelogin = (name: string) => {
 }
 
 const onEditModalClosed = () => {
+  editFocusSection.value = null
   if (!pendingReloginName.value) return
   initialAccountName.value = pendingReloginName.value
   initialMethod.value = 'code'
@@ -793,13 +803,13 @@ const handleExportSession = (acc: AccountUiItem) => {
               </button>
               <div v-if="openMenuName === acc.name" class="fixed inset-0 z-40" aria-hidden="true" @click="closeMenu" />
               <div v-if="openMenuName === acc.name" :class="menuUp ? 'absolute right-0 bottom-full mb-1 z-50 min-w-44 max-h-[70vh] overflow-y-auto ui-card p-1 shadow-[var(--sp-shadow-md)]' : 'absolute right-0 top-full mt-1 z-50 min-w-44 max-h-[70vh] overflow-y-auto ui-card p-1 shadow-[var(--sp-shadow-md)]'" role="menu">
-                <button type="button" role="menuitem" class="ui-menu-item" @click="handleRelogin(acc.name)">{{ t('accounts.relogin') }}</button>
-                <button type="button" role="menuitem" class="ui-menu-item" @click="handleRefreshProfile(acc)">{{ t('accounts.refreshProfile') }}</button>
+                                <button type="button" role="menuitem" class="ui-menu-item" @click="handleRefreshProfile(acc)">{{ t('accounts.refreshProfile') }}</button>
                 <button type="button" role="menuitem" class="ui-menu-item" @click="openTagsModal(acc, 'edit')">{{ t('accounts.editTags') }}</button>
                 <button type="button" role="menuitem" class="ui-menu-item" :disabled="!moveState(acc).canMoveUp" @click="handleMove(acc, 'up')">{{ t('accounts.moveUp') }}</button>
                 <button type="button" role="menuitem" class="ui-menu-item" :disabled="!moveState(acc).canMoveDown" @click="handleMove(acc, 'down')">{{ t('accounts.moveDown') }}</button>
                 <button type="button" role="menuitem" class="ui-menu-item" @click="handlePauseToggle(acc)">{{ acc.raw.paused ? t('accounts.resumeAccount') : t('accounts.pauseAccount') }}</button>
                 <button type="button" role="menuitem" class="ui-menu-item" @click="openEdit(acc)">{{ t('accounts.nameRemarkProxy') }}</button>
+                <button type="button" role="menuitem" class="ui-menu-item" @click="openEditDevice(acc)">{{ t('accounts.deviceFingerprint') }}</button>
                 <button type="button" role="menuitem" class="ui-menu-item" @click="handleExportSession(acc)">{{ t('accounts.exportSessionPackage') }}</button>
                 <button type="button" role="menuitem" class="ui-menu-item" @click="goLogs(acc.name)">{{ t('accounts.runLogs') }}</button>
                 <button type="button" role="menuitem" class="ui-menu-item" @click="openDevices(acc.name)">{{ t('accounts.devicesAndSessions') }}</button>
@@ -860,13 +870,13 @@ const handleExportSession = (acc: AccountUiItem) => {
             </button>
             <div v-if="openMenuName === acc.name" class="fixed inset-0 z-40" aria-hidden="true" @click="closeMenu" />
             <div v-if="openMenuName === acc.name" :class="menuUp ? 'absolute right-0 bottom-full mb-1 z-50 min-w-44 max-h-[70vh] overflow-y-auto ui-card p-1 shadow-[var(--sp-shadow-md)]' : 'absolute right-0 top-full mt-1 z-50 min-w-44 max-h-[70vh] overflow-y-auto ui-card p-1 shadow-[var(--sp-shadow-md)]'" role="menu">
-              <button type="button" role="menuitem" class="ui-menu-item" @click="handleRelogin(acc.name)">{{ t('accounts.relogin') }}</button>
-              <button type="button" role="menuitem" class="ui-menu-item" @click="handleRefreshProfile(acc)">{{ t('accounts.refreshProfile') }}</button>
+                            <button type="button" role="menuitem" class="ui-menu-item" @click="handleRefreshProfile(acc)">{{ t('accounts.refreshProfile') }}</button>
               <button type="button" role="menuitem" class="ui-menu-item" @click="openTagsModal(acc, 'edit')">{{ t('accounts.editTags') }}</button>
               <button type="button" role="menuitem" class="ui-menu-item" :disabled="!moveState(acc).canMoveUp" @click="handleMove(acc, 'up')">{{ t('accounts.moveUp') }}</button>
               <button type="button" role="menuitem" class="ui-menu-item" :disabled="!moveState(acc).canMoveDown" @click="handleMove(acc, 'down')">{{ t('accounts.moveDown') }}</button>
               <button type="button" role="menuitem" class="ui-menu-item" @click="handlePauseToggle(acc)">{{ acc.raw.paused ? t('accounts.resumeAccount') : t('accounts.pauseAccount') }}</button>
               <button type="button" role="menuitem" class="ui-menu-item" @click="openEdit(acc)">{{ t('accounts.nameRemarkProxy') }}</button>
+                <button type="button" role="menuitem" class="ui-menu-item" @click="openEditDevice(acc)">{{ t('accounts.deviceFingerprint') }}</button>
               <button type="button" role="menuitem" class="ui-menu-item" @click="handleExportSession(acc)">{{ t('accounts.exportSessionPackage') }}</button>
               <button type="button" role="menuitem" class="ui-menu-item" @click="goLogs(acc.name)">{{ t('accounts.runLogs') }}</button>
               <button type="button" role="menuitem" class="ui-menu-item" @click="openDevices(acc.name)">{{ t('accounts.devicesAndSessions') }}</button>
@@ -992,7 +1002,7 @@ const handleExportSession = (acc: AccountUiItem) => {
     <AccountImpactModal :isOpen="!!changePlan" :plan="changePlan" :loading="changeLoading" :error="changeError" @close="changePlan = null" @apply="applyDelete" />
     <AccountTagsModal :isOpen="showTagsModal" :account="tagsAccount" :mode="tagsMode" @close="showTagsModal = false" @success="loadAccounts" />
     <AddAccountModal :isOpen="showAddModal" :initialMethod="initialMethod" :initialAccountName="initialAccountName" @close="showAddModal = false" @success="loadAccounts" />
-    <EditAccountModal v-if="editingAccount" :isOpen="showEditModal" :account="editingAccount" @close="showEditModal = false" @closed="onEditModalClosed" @success="loadAccounts" @relogin="handleRelogin" />
+    <EditAccountModal v-if="editingAccount" :isOpen="showEditModal" :account="editingAccount" :focus-section="editFocusSection" @close="showEditModal = false" @closed="onEditModalClosed" @success="loadAccounts" @relogin="handleRelogin" />
     <DeviceManagerModal :isOpen="showDeviceModal" :accountName="deviceAccountName" @close="showDeviceModal = false" />
     <SessionPackageModal :isOpen="showPackageModal" :accountName="packageAccountName" @close="showPackageModal = false" />
     <OfficialMessagesModal :isOpen="showOfficialMessagesModal" :accountName="officialMessagesAccountName" @close="showOfficialMessagesModal = false" />

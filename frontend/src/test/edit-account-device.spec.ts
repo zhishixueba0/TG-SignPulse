@@ -119,4 +119,35 @@ describe('EditAccountModal 设备指纹', () => {
     expect(payload.device_family).toBe('linux')
     expect(payload.device_profile).toBeNull()
   })
+
+  it('focusSection=device 时打开，滚动定位到指纹区', async () => {
+    const scrollSpy = vi.fn()
+    // jsdom 未实现 scrollIntoView：先在原型上挂一个 mock
+    Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', {
+      value: scrollSpy,
+      configurable: true,
+      writable: true,
+    })
+    const wrapper = mount(EditAccountModal, {
+      props: { isOpen: false, account, focusSection: 'device' },
+      global: { stubs: { Modal: ModalStub, AccountImpactModal: true } },
+    })
+    await wrapper.setProps({ isOpen: true })
+    await flushPromises()
+    expect(scrollSpy).toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('普通打开（无 focusSection）时不滚动', async () => {
+    const scrollSpy = vi.fn()
+    Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', {
+      value: scrollSpy,
+      configurable: true,
+      writable: true,
+    })
+    const wrapper = await mountModal()
+    await flushPromises()
+    expect(scrollSpy).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
 })

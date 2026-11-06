@@ -329,6 +329,7 @@
     "moveTopReached": "Already at the top",
     "moveUp": "Move up",
     "nameRemarkProxy": "Name, remark and proxy",
+    "deviceFingerprint": "Device fingerprint",
     "pauseAccount": "Pause account",
     "pauseAccountConfirmMessage": "While paused, this account is excluded from batch checks and automatic inspections, and task runs skip it without recording a failure. Manual checks still work and the account stays online. You can resume it anytime.",
     "pauseAccountConfirmTitle": "Pause account",

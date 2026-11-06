@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import Modal from '../Modal.vue'
 import AccountImpactModal from './AccountImpactModal.vue'
 import { previewAccountChange, applyAccountChange, listDeviceProfiles, type AccountChangePlan, type DeviceProfilePreset } from '../../lib/api/accounts'
@@ -17,6 +17,8 @@ const toast = useToast()
 const props = defineProps<{
   isOpen: boolean
   account: AccountUiItem
+  /** 从卡片「设备指纹」直达时为 'device'：打开后直接定位到指纹区 */
+  focusSection?: string | null
 }>()
 
 const emit = defineEmits<{
@@ -89,6 +91,9 @@ const loadPool = async () => {
 
 const handleClosed = () => emit('closed')
 
+/** 设备指纹区容器：从卡片直达时滚动定位到它 */
+const deviceSectionRef = ref<HTMLElement | null>(null)
+
 watch(() => props.isOpen, (val) => {
   if (val && props.account) {
     const raw = props.account.raw
@@ -109,6 +114,11 @@ watch(() => props.isOpen, (val) => {
     error.value = ''
     void loadPool()
     void loadDeviceProfiles()
+    if (props.focusSection === 'device') {
+      void nextTick(() => {
+        deviceSectionRef.value?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      })
+    }
   }
 })
 
@@ -239,7 +249,7 @@ const handleSave = async (confirmed = false) => {
         </div>
       </div>
 
-      <div class="space-y-1.5">
+      <div ref="deviceSectionRef" class="space-y-1.5">
         <span class="ui-label">{{ t('editAccount.deviceLabel') }}</span>
         <p class="text-xs text-[var(--sp-text-muted)]">
           {{ t('editAccount.deviceCurrent') }}：{{ currentDeviceLabel || t('editAccount.deviceNotSet') }}
