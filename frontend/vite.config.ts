@@ -39,6 +39,14 @@ export default defineConfig({
         // 部署后 SW 仍会提供旧 index.html，旧 chunk 文件名已不存在，
         // 页面跳转即空白。带哈希的静态资源仍走 precache。
         globIgnores: ['**/index.html'],
+        // index.html 既然不进 precache，就绝不能再用它做导航兜底：
+        // vite-plugin-pwa 默认 navigateFallback='index.html'，生成的 SW 会调
+        // createHandlerBoundToURL('index.html')，而该 URL 不在 precache 里，
+        // Workbox 直接抛 non-precached-url，导航/整页刷新随之失败变空白
+        // （2026-11-06 James 实测：控制台唯一报错就是它，无痕也复现）。
+        // 关掉 precached 导航兜底，让文档导航走网络，后端 serve_spa 本来就
+        // 会以 no-store 返回最新 index.html 做 SPA 兜底。
+        navigateFallback: undefined,
         // 注意：这里刻意不配 runtimeCaching 缓存 /api/*。
         // 之前配过 NetworkFirst 缓存常规 GET API：Service Worker 会把
         // /api/proxies 这类动态列表响应也写进 api-cache，同步完成前
