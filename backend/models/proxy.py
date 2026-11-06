@@ -51,6 +51,12 @@ class Proxy(Base):
     last_test_ok = Column(Boolean, nullable=True)
     # 后台归属地补全进行中（刚添加、还没查到归属地时为 True）
     enrich_pending = Column(Boolean, nullable=False, default=False)
+    # 解析 IP 快照：归属地查询时把域名解析出的 IP 存下来（host 本身是 IP
+    # 时就是它自己）。前端靠它区分“域名不同但解析到同一 IP”的节点，
+    # 并显示同 IP 标记。DNS 结果会变，resolved_at 标明快照时间，
+    # 每次 enrichment / 探测时刷新；解析失败不覆盖旧值。
+    resolved_ip = Column(String(64), nullable=True)
+    resolved_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=utc_now_naive, nullable=False)
     updated_at = Column(
         DateTime, default=utc_now_naive, onupdate=utc_now_naive, nullable=False

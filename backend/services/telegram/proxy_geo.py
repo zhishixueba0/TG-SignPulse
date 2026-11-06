@@ -207,6 +207,7 @@ async def lookup_geo(host: str) -> Optional[dict]:
     if not announced:
         return None
     return {
+        "ip": ip,
         "country_code": announced,
         "reg_country": reg if reg and reg != announced else None,
         "announced_asn": asn,

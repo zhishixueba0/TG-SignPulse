@@ -90,6 +90,20 @@ def run_migrations(engine: Optional[Engine] = None) -> None:
                             "ALTER TABLE users ADD COLUMN token_epoch INTEGER NOT NULL DEFAULT 1"
                         )
                     )
+        # proxies 表列补齐迁移
+        if "proxies" in existing_tables:
+            columns = {col["name"] for col in inspector.get_columns("proxies")}
+            with engine.begin() as conn:
+                if "resolved_ip" not in columns:
+                    logger.info("数据库迁移：补齐 proxies.resolved_ip 列")
+                    conn.execute(
+                        text("ALTER TABLE proxies ADD COLUMN resolved_ip VARCHAR(64)")
+                    )
+                if "resolved_at" not in columns:
+                    logger.info("数据库迁移：补齐 proxies.resolved_at 列")
+                    conn.execute(
+                        text("ALTER TABLE proxies ADD COLUMN resolved_at DATETIME")
+                    )
     except Exception as exc:
         logger.error("数据库轻量迁移检查失败: %s", exc, exc_info=True)
         raise

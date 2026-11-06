@@ -476,7 +476,12 @@
     "lastTestedAt": "上次检测 {time}",
     "hasPassword": "有密码",
     "hasSecret": "有 Secret",
-    "tcpPortOpen": "TCP 端口通"
+    "tcpPortOpen": "TCP 端口通",
+    "sameIp": "同 IP ×{count}",
+    "sameIpFilterHint": "只看解析到这个 IP 的节点",
+    "resolvedAt": "解析于 {time}",
+    "ipFilterActive": "正在筛选 IP：{ip}",
+    "clearFilter": "清除筛选"
   },
   "tasks": {
     "empty": "还没有任务",

@@ -476,7 +476,12 @@
     "lastTestedAt": "Last tested {time}",
     "hasPassword": "Password set",
     "hasSecret": "Secret set",
-    "tcpPortOpen": "TCP port reachable"
+    "tcpPortOpen": "TCP port reachable",
+    "sameIp": "Same IP ×{count}",
+    "sameIpFilterHint": "Show only nodes resolving to this IP",
+    "resolvedAt": "Resolved at {time}",
+    "ipFilterActive": "Filtering by IP: {ip}",
+    "clearFilter": "Clear filter"
   },
   "tasks": {
     "empty": "No tasks yet",

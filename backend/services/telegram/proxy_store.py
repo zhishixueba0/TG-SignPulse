@@ -252,6 +252,12 @@ def serialize_proxy(row: Proxy, accounts_count: int = 0) -> dict:
         "display_url": canonical_display_url(row),
         "accounts_count": accounts_count,
         "enrich_pending": bool(row.enrich_pending),
+        # 解析 IP 快照（域名解析出的 IP，host 本身是 IP 时就是它自己；
+        # 解析失败或还没解析过为 None，resolved_at 标明快照时间）
+        "resolved_ip": getattr(row, "resolved_ip", None),
+        "resolved_at": row.resolved_at.isoformat()
+        if getattr(row, "resolved_at", None)
+        else None,
     }
 
 
@@ -514,21 +520,25 @@ async def enrich_proxy(proxy_id: str) -> dict:
         )
     elif not label:
         label = "待命名"
-    update_proxy_enrichment(
-        proxy_id,
-        latency_ms=latency,
-        last_tested_at=now,
-        last_test_ok=ok,
-        country_code=(geo or {}).get("country_code") or row.country_code,
-        reg_country=(geo or {}).get("reg_country"),
-        isp=(geo or {}).get("isp"),
-        org=(geo or {}).get("org"),
-        is_hosting=(geo or {}).get("is_hosting"),
-        announced_asn=(geo or {}).get("announced_asn"),
-        announced_prefix=(geo or {}).get("announced_prefix"),
-        label=label,
-        enrich_pending=False,
-    )
+    enrich_fields: dict[str, Any] = {
+        "latency_ms": latency,
+        "last_tested_at": now,
+        "last_test_ok": ok,
+        "country_code": (geo or {}).get("country_code") or row.country_code,
+        "reg_country": (geo or {}).get("reg_country"),
+        "isp": (geo or {}).get("isp"),
+        "org": (geo or {}).get("org"),
+        "is_hosting": (geo or {}).get("is_hosting"),
+        "announced_asn": (geo or {}).get("announced_asn"),
+        "announced_prefix": (geo or {}).get("announced_prefix"),
+        "label": label,
+        "enrich_pending": False,
+    }
+    # 解析 IP 快照：geo 里有 ip 才写，解析失败不覆盖旧值。
+    if geo and geo.get("ip"):
+        enrich_fields["resolved_ip"] = geo["ip"]
+        enrich_fields["resolved_at"] = now
+    update_proxy_enrichment(proxy_id, **enrich_fields)
     return {
         "ok": ok,
         "latency_ms": latency,

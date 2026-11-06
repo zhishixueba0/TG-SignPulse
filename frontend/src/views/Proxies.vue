@@ -135,9 +135,23 @@ interface ProxyGroup {
   label: string
   items: ProxyItem[]
 }
-const groups = computed<ProxyGroup[]>(() => {
-  const byCode = new Map<string, ProxyItem[]>()
+/** 按解析 IP 筛选（点卡片上的“同 IP ×N”进入，筛选条上可清除） */
+const ipFilter = ref<string | null>(null)
+/** 多少个已加载代理解析到同一 IP（用于“同 IP ×N”标记） */
+const sameIpCount = (ip: string | null | undefined): number => {
+  if (!ip) return 0
+  let n = 0
   for (const p of proxies.value) {
+    if (p.resolved_ip === ip) n++
+  }
+  return n
+}
+const groups = computed<ProxyGroup[]>(() => {
+  const list = ipFilter.value
+    ? proxies.value.filter((p) => p.resolved_ip === ipFilter.value)
+    : proxies.value
+  const byCode = new Map<string, ProxyItem[]>()
+  for (const p of list) {
     const cc = (p.country_code || '').toUpperCase()
     const key = cc || 'UNKNOWN'
     const list = byCode.get(key) ?? []
@@ -1011,6 +1025,13 @@ const saveRoute = async () => {
           <p class="ui-empty-desc">{{ t('proxies.noProxies') }}</p>
         </div>
 
+        <div v-if="ipFilter" class="flex items-center gap-2 rounded-[var(--sp-radius)] border border-amber-500/50 bg-amber-500/10 px-3 py-2 text-xs">
+          <span class="font-mono text-amber-700 dark:text-amber-300">{{ t('proxies.ipFilterActive', { ip: ipFilter }) }}</span>
+          <button type="button" class="ml-auto shrink-0 underline cursor-pointer text-amber-700 dark:text-amber-300" @click="ipFilter = null">
+            {{ t('proxies.clearFilter') }}
+          </button>
+        </div>
+
         <div v-for="group in groups" :key="group.key" class="ui-card overflow-hidden">
           <button
             type="button"
@@ -1060,7 +1081,19 @@ const saveRoute = async () => {
                 >
                 <div class="flex-1 min-w-0">
                   <div class="text-sm font-medium text-[var(--sp-text)] truncate" :title="p.label">{{ p.label }}</div>
-                  <div class="text-xs text-[var(--sp-text-muted)] font-mono truncate mt-0.5" :title="p.display_url">{{ p.display_url }}</div>
+                  <div class="text-xs text-[var(--sp-text-muted)] font-mono break-all mt-0.5" :title="p.display_url">{{ p.display_url }}</div>
+                  <div v-if="p.resolved_ip" class="flex items-center gap-1.5 text-xs mt-1">
+                    <span class="font-mono text-[var(--sp-text-secondary)]" :title="p.resolved_at ? t('proxies.resolvedAt', { time: formatTime(p.resolved_at) }) : ''">IP {{ p.resolved_ip }}</span>
+                    <button
+                      v-if="sameIpCount(p.resolved_ip) > 1"
+                      type="button"
+                      class="shrink-0 rounded-full border border-amber-500/50 bg-amber-500/10 px-1.5 py-px text-[11px] text-amber-700 dark:text-amber-300 cursor-pointer"
+                      :title="t('proxies.sameIpFilterHint')"
+                      @click="ipFilter = p.resolved_ip"
+                    >
+                      {{ t('proxies.sameIp', { count: sameIpCount(p.resolved_ip) }) }}
+                    </button>
+                  </div>
                 </div>
                 <span class="ui-badge shrink-0 font-mono uppercase">{{ p.ptype }}</span>
               </div>

@@ -35,6 +35,33 @@ def test_secret_never_leaked_in_serialization(memory_session_local):
     assert "dd" not in data["display_url"]
 
 
+def test_serialize_includes_resolved_ip(memory_session_local):
+    # 解析 IP 快照：serialize_proxy 返回 resolved_ip / resolved_at，
+    # 前端靠它区分“域名不同但解析到同一 IP”的节点。
+    from datetime import datetime
+
+    row = proxy_store.create_proxy(
+        ptype="mtproto",
+        host="example.com",
+        port=443,
+        secret="dd0123456789abcdef0123456789abcdef",
+        label="test",
+    )
+    data = proxy_store.serialize_proxy(row)
+    assert "resolved_ip" in data
+    assert "resolved_at" in data
+    assert data["resolved_ip"] is None
+    assert data["resolved_at"] is None
+    proxy_store.update_proxy_enrichment(
+        row.id,
+        resolved_ip="88.198.67.154",
+        resolved_at=datetime(2026, 11, 6, 0, 0, 0),
+    )
+    data = proxy_store.serialize_proxy(proxy_store.get_proxy_row(row.id))
+    assert data["resolved_ip"] == "88.198.67.154"
+    assert data["resolved_at"] == "2026-11-06T00:00:00"
+
+
 def test_password_never_leaked(memory_session_local):
     row = proxy_store.create_proxy(
         ptype="socks5",

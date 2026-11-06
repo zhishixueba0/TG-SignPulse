@@ -33,6 +33,10 @@ export interface ProxyItem {
   display_url: string
   accounts_count: number
   enrich_pending: boolean
+  // 解析 IP 快照：域名解析出的 IP（host 本身是 IP 时就是它自己）；
+  // 解析失败或还没解析过为 null，resolved_at 标明快照时间
+  resolved_ip: string | null
+  resolved_at: string | null
 }
 
 export interface ProxyListResponse {
