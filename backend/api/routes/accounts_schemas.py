@@ -106,6 +106,27 @@ class AccountInfo(BaseModel):
     # 自定义顺序（Batch 2）与暂停标志（Batch 5）
     sort_order: Optional[int] = None
     paused: bool = False
+    # SpamBot 限制检测（Batch 3，双向检测）：卡片限制行读取
+    spam_status: Optional[str] = None
+    spam_reply: Optional[str] = None
+    spam_checked_at: Optional[str] = None
+    spam_summary: Optional[str] = None
+    spam_until: Optional[str] = None
+    bidirectional: Optional[str] = None
+
+
+class SpamCheckResponse(BaseModel):
+    """SpamBot 限制检测结果（Batch 3，双向检测）"""
+
+    success: bool = True
+    account_name: str
+    status: str  # free | limited | banned | unknown
+    bidirectional: str  # both | mutual_only | blocked | unknown
+    bidirectional_label: str
+    summary: str
+    message: str  # SpamBot 回答原文
+    until: Optional[str] = None
+    checked_at: str
 
 
 class QrLoginStatusResponse(BaseModel):

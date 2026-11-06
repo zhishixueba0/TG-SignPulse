@@ -226,6 +226,13 @@ class TelegramAccountsMixin:
             # 自定义顺序（Batch 2，None=尚未回填）与暂停标志（Batch 5）
             "sort_order": profile.get("sort_order"),
             "paused": bool(profile.get("paused", False)),
+            # SpamBot 限制检测（Batch 3，双向检测）：卡片限制行读取
+            "spam_status": profile.get("spam_status"),
+            "spam_reply": profile.get("spam_reply"),
+            "spam_checked_at": profile.get("spam_checked_at"),
+            "spam_summary": profile.get("spam_summary"),
+            "spam_until": profile.get("spam_until"),
+            "bidirectional": profile.get("bidirectional"),
         }
 
     def list_accounts(self, force_refresh: bool = False) -> List[Dict[str, Any]]:
@@ -977,6 +984,92 @@ class TelegramAccountsMixin:
             if entry.get("name") == account_name:
                 return entry
         raise ValueError("ACCOUNT_NOT_FOUND")
+
+    async def check_spam_status(self, account_name: str) -> Dict[str, Any]:
+        """SpamBot 限制检测（Batch 3，双向检测）。
+
+        给官方 @SpamBot 发 /start，读回复按开头分类，判断账号能不能
+        主动私聊陌生人。结果存 profile 层，卡片限制行读取。
+
+        全局锁排队，绝不同时批量操作。16 秒内无回复返回 unknown，
+        不覆盖上次结果。会话无效抛 ValueError。
+        """
+        from backend.services.telegram.spam_check import (
+            _SPAMBOT_LOCK,
+            REPLY_MAX_CHARS,
+            SUMMARY_MAX_CHARS,
+            bidirectional_of,
+            classify_spam_reply,
+            extract_until,
+            fetch_spambot_reply,
+        )
+
+        account_name = self._normalize_account_name(account_name)
+        if not self.account_exists(account_name):
+            raise ValueError("ACCOUNT_NOT_FOUND")
+
+        checked_at = utc_now_iso_z()
+        async with _SPAMBOT_LOCK:
+            client, proxy_dict = self._build_account_client(
+                account_name, no_updates=True
+            )
+            await self.verify_account_proxy(account_name, proxy_dict)
+            try:
+                async with acquire_account_lock_with_timeout(
+                    account_name, timeout=30.0
+                ):
+                    if not getattr(client, "is_connected", False):
+                        await client.connect()
+                    reply_text = await fetch_spambot_reply(client)
+            except AccountLockTimeout as e:
+                raise AccountLockTimeout("ACCOUNT_BUSY") from e
+            except Exception as e:
+                if is_invalid_session_error(e):
+                    err_text = str(e) or type(e).__name__
+                    set_account_status(
+                        account_name,
+                        status="invalid",
+                        message=err_text,
+                        code="ACCOUNT_SESSION_INVALID",
+                        needs_relogin=True,
+                    )
+                    raise ValueError(f"ACCOUNT_SESSION_INVALID: {err_text}") from e
+                raise
+
+        if not reply_text:
+            return {
+                "account_name": account_name,
+                "status": "unknown",
+                "bidirectional": "unknown",
+                "bidirectional_label": "未测",
+                "summary": "未知：16 秒内没收到 SpamBot 回复，请稍后再试一次，不要连续点",
+                "message": "",
+                "until": None,
+                "checked_at": checked_at,
+            }
+
+        status, summary = classify_spam_reply(reply_text)
+        bidir, bidir_label = bidirectional_of(status)
+        until = extract_until(reply_text)
+        set_account_profile(
+            account_name,
+            spam_status=status,
+            spam_reply=reply_text[:REPLY_MAX_CHARS],
+            spam_checked_at=checked_at,
+            spam_summary=summary[:SUMMARY_MAX_CHARS],
+            spam_until=until,
+            bidirectional=bidir,
+        )
+        return {
+            "account_name": account_name,
+            "status": status,
+            "bidirectional": bidir,
+            "bidirectional_label": bidir_label,
+            "summary": summary,
+            "message": reply_text,
+            "until": until,
+            "checked_at": checked_at,
+        }
 
     def move_account(self, account_name: str, direction: str) -> Dict[str, Any]:
         """上移/下移：与相邻账号交换 sort_order（Batch 2）。

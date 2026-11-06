@@ -350,7 +350,14 @@
     "sessionPackageFormatSession": "Session 格式（.session + .json）",
     "sessionPackageFormatTdata": "TData 格式（Telegram Desktop）",
     "sessionPackageFormatSessionHint": "解压后得到 .session 与 .json，可导入本面板或其他支持 Session 的客户端。",
-    "sessionPackageFormatTdataHint": "解压后得到 tdata 文件夹，放到电脑上 Telegram Desktop 的数据目录即可直接使用。"
+    "sessionPackageFormatTdataHint": "解压后得到 tdata 文件夹，放到电脑上 Telegram Desktop 的数据目录即可直接使用。",
+    "spamCheck": "检测账号限制",
+    "restriction": "限制",
+    "restrictionNotChecked": "未检测",
+    "restrictionFree": "正常",
+    "restrictionLimited": "单向受限",
+    "restrictionBanned": "封禁",
+    "restrictionUnknown": "未知"
   },
   "proxies": {
     "title": "代理管理",
@@ -1818,5 +1825,22 @@
     "pressButtonFailed": "点击按钮失败",
     "replyKeyboardHint": "键盘按钮（点击即发送）",
     "unreadDivider": "以下为未读消息"
+  },
+  "spamCheck": {
+    "title": "检测账号限制 · {name}",
+    "intro": "会用这个账号给 Telegram 官方的 {'@'}SpamBot 发一条 /start，再读它的回答来判断账号有没有被限制。和你在 Telegram 里手动查是一回事，这条消息会留在这个账号和 SpamBot 的对话里。",
+    "previous": "上次检测",
+    "start": "开始检测",
+    "retry": "重新检测",
+    "running": "正在询问 {'@'}SpamBot，最多要十几秒…",
+    "runningHint": "已等待 {seconds} 秒",
+    "checkFailed": "检测失败，请稍后再试",
+    "verdictFree": "没有受到限制",
+    "verdictLimited": "单向受限",
+    "verdictBanned": "账号被判定为封禁",
+    "verdictUnknown": "没能判断",
+    "until": "解除时间",
+    "replyTitle": "SpamBot 的回答原文",
+    "checkedAt": "检测时间"
   }
 }

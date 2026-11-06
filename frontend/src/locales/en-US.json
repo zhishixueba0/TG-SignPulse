@@ -350,7 +350,14 @@
     "sessionPackageFormatSession": "Session format (.session + .json)",
     "sessionPackageFormatTdata": "TData format (Telegram Desktop)",
     "sessionPackageFormatSessionHint": "Unzips to a .session file and a .json file, importable into this panel or other Session clients.",
-    "sessionPackageFormatTdataHint": "Unzips to a tdata folder; drop it into Telegram Desktop's data directory on your computer to use it directly."
+    "sessionPackageFormatTdataHint": "Unzips to a tdata folder; drop it into Telegram Desktop's data directory on your computer to use it directly.",
+    "spamCheck": "Check account limits",
+    "restriction": "Limits",
+    "restrictionNotChecked": "Not checked",
+    "restrictionFree": "Normal",
+    "restrictionLimited": "One-way limited",
+    "restrictionBanned": "Banned",
+    "restrictionUnknown": "Unknown"
   },
   "proxies": {
     "title": "Proxies",
@@ -1818,5 +1825,22 @@
     "pressButtonFailed": "Failed to press button",
     "replyKeyboardHint": "Keyboard buttons (tap to send)",
     "unreadDivider": "Unread messages"
+  },
+  "spamCheck": {
+    "title": "Check account limits · {name}",
+    "intro": "This sends /start to the official {'@'}SpamBot from this account and reads its reply to tell whether the account is limited. It is the same check you would do manually in Telegram, and the message stays in this account’s chat with SpamBot.",
+    "previous": "Last check",
+    "start": "Start check",
+    "retry": "Check again",
+    "running": "Asking {'@'}SpamBot, this takes up to a dozen seconds…",
+    "runningHint": "Waited {seconds}s",
+    "checkFailed": "Check failed, please try again later",
+    "verdictFree": "No limits applied",
+    "verdictLimited": "One-way limited",
+    "verdictBanned": "Account judged banned",
+    "verdictUnknown": "Could not determine",
+    "until": "Lifted at",
+    "replyTitle": "SpamBot reply (original)",
+    "checkedAt": "Checked at"
   }
 }

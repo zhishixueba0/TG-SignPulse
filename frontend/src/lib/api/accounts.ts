@@ -128,6 +128,13 @@ export interface AccountInfo {
   /** 估计来源：user_id（表内估计）/ bound_after（表外，显示“之后”）/ bound_before（表外，显示“之前”） */
   registered_est_source?: string | null;
   registered_est_checked_at?: string | null;
+  /** SpamBot 限制检测（Batch 3，双向检测）：status free/limited/banned/unknown */
+  spam_status?: string | null;
+  spam_reply?: string | null;
+  spam_checked_at?: string | null;
+  spam_summary?: string | null;
+  spam_until?: string | null;
+  bidirectional?: string | null;
   /** 自定义顺序（Batch 2，服务端持久化）与暂停标志（Batch 5） */
   sort_order?: number | null;
   paused?: boolean;
@@ -374,6 +381,28 @@ export const listAccountOfficialMessages = (token: string, accountName: string, 
 export const refreshAccountProfile = (token: string, accountName: string) =>
   request<{ success: boolean; message: string; account?: AccountInfo | null }>(
     `/accounts/${encodeURIComponent(accountName)}/refresh-profile`,
+    { method: "POST" },
+    token,
+    MEDIUM_TIMEOUT_MS,
+  );
+
+/** SpamBot 限制检测结果（Batch 3，双向检测） */
+export interface SpamCheckResult {
+  success: boolean;
+  account_name: string;
+  status: "free" | "limited" | "banned" | "unknown" | string;
+  bidirectional: "both" | "mutual_only" | "blocked" | "unknown" | string;
+  bidirectional_label: string;
+  summary: string;
+  message: string;
+  until?: string | null;
+  checked_at: string;
+}
+
+/** SpamBot 限制检测：给官方 @SpamBot 发 /start 读回复，最多约 30 秒 */
+export const checkAccountSpam = (token: string, accountName: string) =>
+  request<SpamCheckResult>(
+    `/accounts/${encodeURIComponent(accountName)}/spam-check`,
     { method: "POST" },
     token,
     MEDIUM_TIMEOUT_MS,

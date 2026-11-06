@@ -276,6 +276,13 @@ def get_account_profile(account_name: str) -> dict[str, Any]:
         "device_family": entry.get("device_family"),
         "device_profile": entry.get("device_profile"),
         "proxy_probe_policy": entry.get("proxy_probe_policy", "strict"),
+        # SpamBot 限制检测（Batch 3，双向检测）：status free/limited/banned/unknown
+        "spam_status": entry.get("spam_status"),
+        "spam_reply": entry.get("spam_reply"),
+        "spam_checked_at": entry.get("spam_checked_at"),
+        "spam_summary": entry.get("spam_summary"),
+        "spam_until": entry.get("spam_until"),
+        "bidirectional": entry.get("bidirectional"),
         # 自定义顺序（Batch 2）：None 表示老账号尚未回填，由列表接口一次性回填
         "sort_order": entry.get("sort_order"),
         "paused": bool(entry.get("paused", False)),
@@ -322,6 +329,12 @@ def set_account_profile(
     device_profile: Optional[dict] = None,
     sort_order: Optional[int] = None,
     paused: Optional[bool] = None,
+    spam_status: Optional[str] = None,
+    spam_reply: Optional[str] = None,
+    spam_checked_at: Optional[str] = None,
+    spam_summary: Optional[str] = None,
+    spam_until: Optional[str] = None,
+    bidirectional: Optional[str] = None,
 ) -> None:
     data = _load_account_store()
     accounts = data["accounts"]
@@ -361,6 +374,19 @@ def set_account_profile(
         entry["device_profile"] = device_profile
     if proxy_probe_policy is not None:
         entry["proxy_probe_policy"] = str(proxy_probe_policy).strip().lower()
+    # SpamBot 限制检测（Batch 3）：只有显式传入才写，None 表示不改
+    if spam_status is not None:
+        entry["spam_status"] = spam_status
+    if spam_reply is not None:
+        entry["spam_reply"] = spam_reply
+    if spam_checked_at is not None:
+        entry["spam_checked_at"] = spam_checked_at
+    if spam_summary is not None:
+        entry["spam_summary"] = spam_summary
+    if spam_until is not None:
+        entry["spam_until"] = spam_until
+    if bidirectional is not None:
+        entry["bidirectional"] = bidirectional
     entry["updated_at"] = utc_now_iso()
     accounts[account_name] = entry
     _save_account_store(data)

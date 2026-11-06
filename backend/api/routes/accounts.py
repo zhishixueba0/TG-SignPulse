@@ -57,6 +57,7 @@ from backend.api.routes.accounts_schemas import (
     ResetAuthorizationsResponse,
     SessionSettingsResponse,
     SessionSettingsUpdateRequest,
+    SpamCheckResponse,
     StandaloneSessionExportRequest,
     StandaloneSessionExportResponse,
     TerminateDeviceResponse,
@@ -1415,6 +1416,68 @@ async def refresh_account_profile(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="ACCOUNT_REFRESH_FAILED",
+        )
+
+
+@router.post("/{account_name}/spam-check", response_model=SpamCheckResponse)
+async def check_account_spam(
+    account_name: str,
+    http_request: Request,
+    current_user: User = Depends(get_current_user),
+):
+    """SpamBot 限制检测（Batch 3，双向检测）。
+
+    给官方 @SpamBot 发 /start，读回复按开头分类，判断账号能不能
+    主动私聊陌生人。只和官方 @SpamBot 对话，不给陌生人发消息。
+
+    限流 6 次/600 秒；全局锁排队，绝不同时批量操作。
+    16 秒内无回复返回 unknown，不覆盖上次结果。
+    """
+    try:
+        account_name = validate_storage_name(account_name, field_name="account_name")
+        _apply_rate_limit(
+            "accounts.spam_check",
+            http_request,
+            "Too many SpamBot checks. Please try again later.",
+            account_name,
+            max_attempts=6,
+            window_seconds=600,
+            block_seconds=900,
+        )
+        result = await get_telegram_service().check_spam_status(account_name)
+        return SpamCheckResponse(
+            success=True,
+            account_name=result["account_name"],
+            status=result["status"],
+            bidirectional=result["bidirectional"],
+            bidirectional_label=result["bidirectional_label"],
+            summary=result["summary"],
+            message=result["message"],
+            until=result["until"],
+            checked_at=result["checked_at"],
+        )
+    except AccountLockTimeout:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="ACCOUNT_BUSY")
+    except HTTPException:
+        raise
+    except ValueError as e:
+        detail = str(e)
+        if detail == "ACCOUNT_NOT_FOUND":
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail=detail
+            ) from e
+        if detail.startswith("ACCOUNT_SESSION_INVALID"):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED, detail=detail
+            ) from e
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=detail
+        ) from e
+    except Exception as e:
+        logger.error("SpamBot 限制检测失败: %s", e, exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="SPAM_CHECK_FAILED",
         )
 
 

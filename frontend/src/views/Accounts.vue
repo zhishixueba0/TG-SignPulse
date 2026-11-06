@@ -21,6 +21,7 @@ import EditAccountModal from '../components/accounts/EditAccountModal.vue'
 import DeviceManagerModal from '../components/accounts/DeviceManagerModal.vue'
 import OfficialMessagesModal from '../components/accounts/OfficialMessagesModal.vue'
 import SessionPackageModal from '../components/accounts/SessionPackageModal.vue'
+import SpamCheckModal from '../components/accounts/SpamCheckModal.vue'
 import PageRetry from '../components/PageRetry.vue'
 import FilterEmptyState from '../components/FilterEmptyState.vue'
 import { devLog } from '../lib/devLog'
@@ -345,6 +346,32 @@ const openEditDevice = (acc: AccountUiItem) => {
 const openDevices = (name: string) => {
   deviceAccountName.value = name
   showDeviceModal.value = true
+}
+
+/** SpamBot 限制检测（Batch 3，双向检测）弹窗 */
+const showSpamCheckModal = ref(false)
+const spamCheckAccount = ref<AccountUiItem | null>(null)
+const openSpamCheck = (acc: AccountUiItem) => {
+  spamCheckAccount.value = acc
+  showSpamCheckModal.value = true
+}
+
+/** 卡片限制行文案：按 spam_status 分档，未测过显示“未检测” */
+const restrictionText = (acc: AccountUiItem): string => {
+  const s = acc.raw.spam_status
+  if (s === 'free') return t('accounts.restrictionFree')
+  if (s === 'limited') return t('accounts.restrictionLimited')
+  if (s === 'banned') return t('accounts.restrictionBanned')
+  if (s === 'unknown') return t('accounts.restrictionUnknown')
+  return t('accounts.restrictionNotChecked')
+}
+
+/** 卡片限制行颜色：正常绿、受限/封禁红、未检测灰 */
+const restrictionClass = (acc: AccountUiItem): string => {
+  const s = acc.raw.spam_status
+  if (s === 'free') return 'text-emerald-600 dark:text-emerald-400'
+  if (s === 'limited' || s === 'banned') return 'text-rose-600 dark:text-rose-400'
+  return 'text-[var(--sp-text-muted)]'
 }
 
 const openOfficialMessages = (name: string) => {
@@ -810,6 +837,7 @@ const handleExportSession = (acc: AccountUiItem) => {
                 <button type="button" role="menuitem" class="ui-menu-item" @click="handlePauseToggle(acc)">{{ acc.raw.paused ? t('accounts.resumeAccount') : t('accounts.pauseAccount') }}</button>
                 <button type="button" role="menuitem" class="ui-menu-item" @click="openEdit(acc)">{{ t('accounts.nameRemarkProxy') }}</button>
                 <button type="button" role="menuitem" class="ui-menu-item" @click="openEditDevice(acc)">{{ t('accounts.deviceFingerprint') }}</button>
+                <button type="button" role="menuitem" class="ui-menu-item" @click="openSpamCheck(acc)">{{ t('accounts.spamCheck') }}</button>
                 <button type="button" role="menuitem" class="ui-menu-item" @click="handleExportSession(acc)">{{ t('accounts.exportSessionPackage') }}</button>
                 <button type="button" role="menuitem" class="ui-menu-item" @click="goLogs(acc.name)">{{ t('accounts.runLogs') }}</button>
                 <button type="button" role="menuitem" class="ui-menu-item" @click="openDevices(acc.name)">{{ t('accounts.devicesAndSessions') }}</button>
@@ -877,6 +905,7 @@ const handleExportSession = (acc: AccountUiItem) => {
               <button type="button" role="menuitem" class="ui-menu-item" @click="handlePauseToggle(acc)">{{ acc.raw.paused ? t('accounts.resumeAccount') : t('accounts.pauseAccount') }}</button>
               <button type="button" role="menuitem" class="ui-menu-item" @click="openEdit(acc)">{{ t('accounts.nameRemarkProxy') }}</button>
                 <button type="button" role="menuitem" class="ui-menu-item" @click="openEditDevice(acc)">{{ t('accounts.deviceFingerprint') }}</button>
+                <button type="button" role="menuitem" class="ui-menu-item" @click="openSpamCheck(acc)">{{ t('accounts.spamCheck') }}</button>
               <button type="button" role="menuitem" class="ui-menu-item" @click="handleExportSession(acc)">{{ t('accounts.exportSessionPackage') }}</button>
               <button type="button" role="menuitem" class="ui-menu-item" @click="goLogs(acc.name)">{{ t('accounts.runLogs') }}</button>
               <button type="button" role="menuitem" class="ui-menu-item" @click="openDevices(acc.name)">{{ t('accounts.devicesAndSessions') }}</button>
@@ -905,6 +934,10 @@ const handleExportSession = (acc: AccountUiItem) => {
         <div v-if="acc.raw.device_profile" class="flex gap-1.5">
           <span class="text-[var(--sp-text-muted)] shrink-0">{{ t('accounts.device') }}：</span>
           <span class="text-[var(--sp-text-secondary)] truncate">{{ acc.raw.device_profile.device_model }} · {{ acc.raw.device_profile.system_version }}</span>
+        </div>
+        <div class="flex gap-1.5">
+          <span class="text-[var(--sp-text-muted)] shrink-0">{{ t('accounts.restriction') }}：</span>
+          <span class="truncate" :class="restrictionClass(acc)" :title="acc.raw.spam_summary || ''">{{ restrictionText(acc) }}<template v-if="acc.raw.spam_until">（{{ acc.raw.spam_until }}）</template></span>
         </div>
         <div class="flex gap-1.5">
           <span class="text-[var(--sp-text-muted)] shrink-0">{{ t('accounts.registeredAt') }}：</span>
@@ -1006,5 +1039,6 @@ const handleExportSession = (acc: AccountUiItem) => {
     <DeviceManagerModal :isOpen="showDeviceModal" :accountName="deviceAccountName" @close="showDeviceModal = false" />
     <SessionPackageModal :isOpen="showPackageModal" :accountName="packageAccountName" @close="showPackageModal = false" />
     <OfficialMessagesModal :isOpen="showOfficialMessagesModal" :accountName="officialMessagesAccountName" @close="showOfficialMessagesModal = false" />
+    <SpamCheckModal v-if="spamCheckAccount" :isOpen="showSpamCheckModal" :accountName="spamCheckAccount.name" :previous="{ status: spamCheckAccount.raw.spam_status, checked_at: spamCheckAccount.raw.spam_checked_at, summary: spamCheckAccount.raw.spam_summary }" @close="showSpamCheckModal = false" @success="loadAccounts" />
   </div>
 </template>
