@@ -262,6 +262,67 @@ class TestTDataApiEndpoints:
         assert "TDATA_CONVERTER_UNAVAILABLE" in resp.text
 
 
+class TestSessionZipRouting:
+    """ZIP 里含 .session 文件（如 tg-manager 导出包）必须走 Telethon 导入，
+    不能一见 ZIP 就当 TData 报错 TDATA_INVALID_STRUCTURE。"""
+
+    def _make_session_zip(self, account_name: str = "959786971113") -> bytes:
+        from tests.test_session_importer import _make_telethon_sqlite_bytes
+
+        session_bytes = _make_telethon_sqlite_bytes()
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+            zf.writestr(f"{account_name}.session", session_bytes)
+            zf.writestr(f"{account_name}.json", b'{"dc_id": 2}')
+        return buf.getvalue()
+
+    def test_zip_with_session_goes_to_telethon_import(self, api_client):
+        from tests.test_api import _mock_tg_service
+
+        headers = _auth(_login(api_client))
+        zip_bytes = self._make_session_zip()
+        mock_svc = _mock_tg_service()
+        mock_svc.import_session = AsyncMock(
+            return_value={
+                "user_id": 12345,
+                "first_name": "Test",
+                "username": "test",
+            }
+        )
+        mock_svc.import_tdata_session = AsyncMock()
+        with patch(
+            "backend.api.routes.accounts.get_telegram_service",
+            return_value=mock_svc,
+        ):
+            resp = api_client.post(
+                "/api/accounts/import-session",
+                headers=headers,
+                files={"file": ("959786971113.zip", zip_bytes, "application/zip")},
+                data={"account_name": "959786971113"},
+            )
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["success"] is True
+        # 走的是 Telethon 导入，且传的是解出的 .session 字节（不是整个 ZIP）
+        mock_svc.import_session.assert_awaited_once()
+        called_payload = mock_svc.import_session.call_args.kwargs["payload"]
+        assert called_payload.startswith(b"SQLite format 3")
+        mock_svc.import_tdata_session.assert_not_awaited()
+
+    def test_zip_without_session_or_key_datas_still_tdata_error(self, api_client):
+        headers = _auth(_login(api_client))
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+            zf.writestr("random.txt", b"hello")
+        resp = api_client.post(
+            "/api/accounts/import-session",
+            headers=headers,
+            files={"file": ("bad.zip", buf.getvalue(), "application/zip")},
+            data={"account_name": "bad_test"},
+        )
+        assert resp.status_code == 400
+        assert "TDATA_INVALID_STRUCTURE" in resp.text
+
+
 def _make_pyrogram_sqlite_bytes(
     dc_id: int = 2, auth_key: bytes | None = None, user_id: int = 123456
 ) -> bytes:

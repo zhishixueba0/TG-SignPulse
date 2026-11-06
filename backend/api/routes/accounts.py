@@ -358,6 +358,39 @@ async def cancel_qr_login(
         )
 
 
+def _extract_session_from_zip(
+    zip_bytes: bytes, account_name: str = ""
+) -> Optional[bytes]:
+    """从 ZIP 里找 Telethon/Pyrogram .session 文件并返回其内容。
+
+    tg-manager 导出的会话包就是这种 ZIP（<手机号>.session + .json），
+    不是 TData。路由不能一见 ZIP 就当 TData，否则这种包会报
+    TDATA_INVALID_STRUCTURE。返回 None 表示 ZIP 里没有 .session 文件，
+    调用方再走 TData 路径（由它校验结构并报错）。
+    优先取与账号名匹配的 .session，没有匹配时取第一个。
+    """
+    import io
+    import zipfile
+
+    try:
+        with zipfile.ZipFile(io.BytesIO(zip_bytes)) as zf:
+            names = [
+                n
+                for n in zf.namelist()
+                if n.lower().endswith(".session") and not n.endswith("/")
+            ]
+            if not names:
+                return None
+            if account_name:
+                for n in names:
+                    base = n.rsplit("/", 1)[-1]
+                    if base.rsplit(".session", 1)[0] == account_name:
+                        return zf.read(n)
+            return zf.read(names[0])
+    except Exception:
+        return None
+
+
 def _is_zip_payload(payload: bytes | str) -> bool:
     """Check whether session payload is a ZIP archive (e.g. Telegram Desktop TData)."""
     if isinstance(payload, bytes):
@@ -483,15 +516,29 @@ async def import_session(
                 if isinstance(payload, bytes)
                 else base64.b64decode(payload.strip())
             )
-            res = await svc.import_tdata_session(
-                account_name=account_name,
-                zip_payload=zip_bytes,
-                proxy_id=proxy_id,
-                proxy_mode=proxy_mode,
-                password=tdata_password,
-                force=force,
-                proxy=proxy,
-            )
+            # ZIP 里含 .session 文件（如 tg-manager 导出包）→ 走 Telethon 导入；
+            # 不含才走 TData（由它校验 key_datas 并报错）。
+            session_bytes = _extract_session_from_zip(zip_bytes, account_name)
+            if session_bytes is not None:
+                res = await svc.import_session(
+                    account_name=account_name,
+                    payload=session_bytes,
+                    session_type=session_type,
+                    force=force,
+                    proxy=proxy,
+                    proxy_id=proxy_id,
+                    proxy_mode=proxy_mode,
+                )
+            else:
+                res = await svc.import_tdata_session(
+                    account_name=account_name,
+                    zip_payload=zip_bytes,
+                    proxy_id=proxy_id,
+                    proxy_mode=proxy_mode,
+                    password=tdata_password,
+                    force=force,
+                    proxy=proxy,
+                )
         else:
             res = await svc.import_session(
                 account_name=account_name,
