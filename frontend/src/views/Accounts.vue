@@ -362,15 +362,16 @@ const restrictionText = (acc: AccountUiItem): string => {
   if (s === 'free') return t('accounts.restrictionFree')
   if (s === 'limited') return t('accounts.restrictionLimited')
   if (s === 'banned') return t('accounts.restrictionBanned')
+  if (s === 'frozen') return t('accounts.restrictionFrozen')
   if (s === 'unknown') return t('accounts.restrictionUnknown')
   return t('accounts.restrictionNotChecked')
 }
 
-/** 卡片限制行颜色：正常绿、受限/封禁红、未检测灰 */
+/** 卡片限制行颜色：正常绿、受限/封禁/冻结红、未检测灰 */
 const restrictionClass = (acc: AccountUiItem): string => {
   const s = acc.raw.spam_status
   if (s === 'free') return 'text-emerald-600 dark:text-emerald-400'
-  if (s === 'limited' || s === 'banned') return 'text-rose-600 dark:text-rose-400'
+  if (s === 'limited' || s === 'banned' || s === 'frozen') return 'text-rose-600 dark:text-rose-400'
   return 'text-[var(--sp-text-muted)]'
 }
 

@@ -14,6 +14,7 @@ from backend.services.telegram.spam_check import (
     classify_spam_reply,
     extract_until,
     fetch_spambot_reply,
+    is_frozen_error,
 )
 
 
@@ -64,12 +65,26 @@ class TestClassifySpamReply:
         status, _ = classify_spam_reply("")
         assert status == "unknown"
 
-    def test_real_limited_reply_with_greeting_is_limited(self):
-        # 真实回复（2026-11-06，账号 12098814721）：开头是问候语，第二段
-        # "I'm very sorry" 只是客套，标志词 "Unfortunately" 在后面。
-        # 绝不能把客套的 sorry 当成全限制，也不能只靠 limit 兜底。
+    def test_real_templates_from_james(self):
+        # James 2026-11-06 给的三条原文模板（全账户通用，不含问候语）。
+        # 正常
         status, _ = classify_spam_reply(
-            "Hello Nora Hutton!\n\n"
+            "Good news, no limits are currently applied to your account. "
+            "You’re free as a bird!"
+        )
+        assert status == "free"
+        # 部分双向：phone numbers 触发 + Premium 放宽
+        status, _ = classify_spam_reply(
+            "Unfortunately, some phone numbers may trigger a harsh response "
+            "from our anti-spam systems. If you think this is the case with "
+            "you, you can submit a complaint to our moderators or subscribe "
+            "to Telegram Premium to get less strict limits."
+        )
+        assert status == "limited"
+        # 完全限制（双向）：只能发给有你号码的人。注意它里面也有
+        # "Unfortunately" 和 "I'm very sorry"，绝不能先按 Unfortunately
+        # 判成部分双向。
+        status, _ = classify_spam_reply(
             "I’m very sorry that you had to contact me. Unfortunately, "
             "some actions can trigger a harsh response from our anti-spam "
             "systems. If you think your account was limited by mistake, "
@@ -79,7 +94,16 @@ class TestClassifySpamReply:
             "contacts or add them to groups and channels. Of course, when "
             "people contact you first, you can always reply to them."
         )
-        assert status == "limited"
+        assert status == "banned"
+
+    def test_frozen_blocked_reply_is_frozen(self):
+        # 冻结号 SpamBot 回的原文（网上实测）：注意里面有 blocked，
+        # 必须判 frozen 而不是 banned。
+        status, _ = classify_spam_reply(
+            "Your account was blocked for violations of the Telegram Terms "
+            "of Service based on user reports confirmed by our moderators."
+        )
+        assert status == "frozen"
 
     def test_unrelated_text_is_unknown(self):
         status, _ = classify_spam_reply("Hello, how can I help you?")
@@ -102,9 +126,36 @@ class TestBidirectionalOf:
         assert bidir == "mutual_only"
         assert label == "双向"
 
+    def test_frozen_is_frozen(self):
+        bidir, label = bidirectional_of("frozen")
+        assert bidir == "frozen"
+        assert label == "已冻结"
+
     def test_unknown_is_unknown(self):
         bidir, _ = bidirectional_of("unknown")
         assert bidir == "unknown"
+
+
+class TestIsFrozenError:
+    def test_frozen_method_invalid_is_frozen(self):
+        class FrozenMethodInvalid(Exception):
+            pass
+
+        assert is_frozen_error(FrozenMethodInvalid("FROZEN_METHOD_INVALID")) is True
+
+    def test_frozen_participant_missing_is_frozen(self):
+        class FrozenParticipantMissing(Exception):
+            pass
+
+        assert (
+            is_frozen_error(FrozenParticipantMissing("FROZEN_PARTICIPANT_MISSING"))
+            is True
+        )
+
+    def test_generic_error_is_not_frozen(self):
+        assert is_frozen_error(RuntimeError("timeout")) is False
+        assert is_frozen_error(ValueError("AUTH_KEY_UNREGISTERED")) is False
+        assert is_frozen_error(ValueError("USER_DEACTIVATED")) is False
 
 
 class TestExtractUntil:

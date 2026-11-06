@@ -3,20 +3,28 @@
 给 Telegram 官方 @SpamBot 发 /start，读它的回答，按开头分类，
 判断账号能不能主动私聊陌生人（双向）。
 
-分类规则（James 2026-11-05 实测 + 2026-11-06 确认，开头优先）：
-- free as a bird / no limits / good news → free（正常，无限制）
-- Unfortunately → limited（部分双向，只能给特定区域的用户随意互发）
-- Sorry / I'm sorry 开头 → banned（双向，必须是双向联系人才可以互发）
-- blocked / banned / terminated / 被封 → banned
-- 含 limit / 限制 → limited（兜底）
-- 其他 → unknown
+分类规则（James 2026-11-06 给的三条原文模板，全账户通用，不含问候语）：
+- 正常："Good news, no limits are currently applied to your account.
+  You're free as a bird!" → free（正常，无限制）
+- 部分双向："Unfortunately, some phone numbers may trigger a harsh response
+  from our anti-spam systems. ... subscribe to Telegram Premium to get
+  less strict limits." → limited（部分双向）
+- 完全限制（双向）："I'm very sorry that you had to contact me.
+  Unfortunately, some actions can trigger a harsh response ... While the
+  account is limited, you will not be able to send messages to people who
+  do not have your number in their phone contacts ..." → banned（双向）
+- 已冻结："Your account was blocked for violations of the Telegram Terms
+  of Service based on user reports confirmed by our moderators."
+  → frozen（已冻结，第四类，James 2026-11-06 提出，网上实测文案）。
+  冻结号能给 SpamBot 发消息，靠这句文案判；调不允许的接口时报
+  FROZEN_METHOD_INVALID / FROZEN_PARTICIPANT_MISSING（兜底）。
 
-注意：真实 SpamBot 回复开头常带问候语（"Hello {name}!"），"Unfortunately"
-可能在第二段、"I'm very sorry" 只是客套（"很抱歉让你来找我"），所以：
-- "unfortunately" 按全文匹配（部分限制的标志词），且在 "sorry" 之前检查——
-  部分限制的回复里同时有 "I'm very sorry" 和 "Unfortunately"，先按 sorry
-  判会错判成全限制；
-- "sorry" 只看去掉问候语后的开头，避免把客套的 "I'm very sorry" 当成全限制。
+"Unfortunately" 两条受限模板里都有，不能只靠它区分部分还是完全，
+要靠标志句：
+- "will not be able to send messages to people who do not have your
+  number"（只能发给有你号码的人）→ 完全限制，先检查；
+- "some phone numbers" / "Telegram Premium ... less strict limits" → 部分双向；
+- 兜底才看开头：Unfortunately 开头 → 部分，Sorry 开头 → 完全。
 
 只和官方 @SpamBot 对话，不给任何陌生人发消息。get_me / UserFull 里
 没有 spam 限制字段，MTProto 也没有只读的限制查询接口，@SpamBot 是
@@ -43,6 +51,22 @@ SUMMARY_MAX_CHARS = 200
 FETCH_MAX_ROUNDS = 8
 FETCH_POLL_SECONDS = 2.0
 
+# 冻结号调不允许的接口时报的 Pyrogram 错误（按类名判，不 import
+# Pyrogram 也能用）。注意：冻结号能给 SpamBot 发消息，所以发 /start
+# 不会因此失败；冻结主要靠 SpamBot 回复里的 blocked 文案来判，这里
+# 是调其他接口时报 FROZEN 错误的兜底。UserDeactivated 是号被删/注销，
+# 不是冻结，不用。
+FROZEN_ERROR_NAMES = frozenset({"FrozenMethodInvalid", "FrozenParticipantMissing"})
+
+
+def is_frozen_error(exc: BaseException) -> bool:
+    """是不是冻结号调不允许的接口报的 FROZEN 错误。"""
+    if type(exc).__name__ in FROZEN_ERROR_NAMES:
+        return True
+    text = str(exc) or ""
+    return "FROZEN_METHOD_INVALID" in text or "FROZEN_PARTICIPANT_MISSING" in text
+
+
 # 全局锁：所有账号的 SpamBot 检查排队，绝不同时批量操作
 _SPAMBOT_LOCK = asyncio.Lock()
 
@@ -55,12 +79,7 @@ def classify_spam_reply(text: str) -> tuple[str, str]:
     - summary: 简短中文说明
     """
     low = (text or "").lower()
-    # 去掉开头的问候语段落（"Hello {name}!"），分类看后面的正文开头。
     stripped = low.strip()
-    if stripped.startswith("hello"):
-        parts = stripped.split("\n\n", 1)
-        if len(parts) == 2:
-            stripped = parts[1].strip()
     if (
         "no limits" in low
         or "free as a bird" in low
@@ -68,9 +87,25 @@ def classify_spam_reply(text: str) -> tuple[str, str]:
         or "没有限制" in (text or "")
     ):
         return "free", "正常：无限制"
-    # "unfortunately" 全文匹配且先于 sorry：部分限制回复里同时有
-    # "I'm very sorry"（客套）和 "Unfortunately"（标志词）。
-    if "unfortunately" in low:
+    # 冻结：SpamBot 回 "Your account was blocked for violations of the
+    # Telegram Terms of Service based on user reports confirmed by our
+    # moderators."（James 2026-11-06：第四类；网上实测文案）。
+    # 必须在通用 blocked 检查之前，因为这句里也有 blocked。
+    if (
+        "blocked for violations of the telegram terms of service" in low
+        or "your account was blocked for violations" in low
+    ):
+        return "frozen", "已冻结：账号已被冻结，无法发送任何消息"
+    # 完全限制的标志句：只能发给有你号码的人（必须是双向联系人）。
+    # 先于 "unfortunately" 检查，因为完全限制模板里也有 Unfortunately。
+    if "will not be able to send messages to people who do not have your number" in low:
+        return "banned", "双向：必须是双向联系人才可以互发"
+    # 部分双向的标志：phone numbers 触发 + Premium 可放宽。
+    if "some phone numbers" in low or (
+        "telegram premium" in low and "less strict" in low
+    ):
+        return "limited", "部分双向：只能给特定区域的用户随意互发"
+    if stripped.startswith("unfortunately"):
         return "limited", "部分双向：只能给特定区域的用户随意互发"
     if (
         stripped.startswith("sorry")
@@ -98,6 +133,7 @@ def bidirectional_of(status: str) -> tuple[str, str]:
     - free → both（正常，无限制）
     - limited → partial（部分双向，只能给特定区域的用户随意互发）
     - banned → mutual_only（双向，必须是双向联系人才可以互发）
+    - frozen → frozen（已冻结，无法发送任何消息）
     - unknown → unknown（未测）
     """
     if status == "free":
@@ -106,6 +142,8 @@ def bidirectional_of(status: str) -> tuple[str, str]:
         return "partial", "部分双向"
     if status == "banned":
         return "mutual_only", "双向"
+    if status == "frozen":
+        return "frozen", "已冻结"
     return "unknown", "未测"
 
 

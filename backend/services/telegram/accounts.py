@@ -1002,6 +1002,7 @@ class TelegramAccountsMixin:
             classify_spam_reply,
             extract_until,
             fetch_spambot_reply,
+            is_frozen_error,
         )
 
         account_name = self._normalize_account_name(account_name)
@@ -1024,6 +1025,32 @@ class TelegramAccountsMixin:
             except AccountLockTimeout as e:
                 raise AccountLockTimeout("ACCOUNT_BUSY") from e
             except Exception as e:
+                if is_frozen_error(e):
+                    # 冻结：调不允许的接口报 FROZEN_METHOD_INVALID /
+                    # FROZEN_PARTICIPANT_MISSING。冻结号能给 SpamBot 发消息，
+                    # 所以这里只是兜底；主判定在 SpamBot 回复文案里
+                    # （"blocked for violations of the Telegram Terms of
+                    # Service"）。结果保存，卡片显示已冻结。
+                    summary = "已冻结：账号已被冻结，无法发送任何消息"
+                    set_account_profile(
+                        account_name,
+                        spam_status="frozen",
+                        spam_reply="",
+                        spam_checked_at=checked_at,
+                        spam_summary=summary,
+                        spam_until=None,
+                        bidirectional="frozen",
+                    )
+                    return {
+                        "account_name": account_name,
+                        "status": "frozen",
+                        "bidirectional": "frozen",
+                        "bidirectional_label": "已冻结",
+                        "summary": summary,
+                        "message": "",
+                        "until": None,
+                        "checked_at": checked_at,
+                    }
                 if is_invalid_session_error(e):
                     err_text = str(e) or type(e).__name__
                     set_account_status(

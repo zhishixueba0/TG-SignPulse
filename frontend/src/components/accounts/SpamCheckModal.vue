@@ -64,6 +64,7 @@ const verdictTitle = computed(() => {
   if (s === 'free') return t('spamCheck.verdictFree')
   if (s === 'limited') return t('spamCheck.verdictLimited')
   if (s === 'banned') return t('spamCheck.verdictBanned')
+  if (s === 'frozen') return t('spamCheck.verdictFrozen')
   return t('spamCheck.verdictUnknown')
 })
 
@@ -83,6 +84,7 @@ const previousLabel = computed(() => {
     free: t('spamCheck.verdictFree'),
     limited: t('spamCheck.verdictLimited'),
     banned: t('spamCheck.verdictBanned'),
+    frozen: t('spamCheck.verdictFrozen'),
     unknown: t('spamCheck.verdictUnknown'),
   }
   return map[p.status] ?? p.status

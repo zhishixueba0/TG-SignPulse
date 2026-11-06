@@ -357,7 +357,8 @@
     "restrictionFree": "正常",
     "restrictionLimited": "部分双向",
     "restrictionBanned": "双向",
-    "restrictionUnknown": "未知"
+    "restrictionUnknown": "未知",
+    "restrictionFrozen": "已冻结"
   },
   "proxies": {
     "title": "代理管理",
@@ -1841,6 +1842,7 @@
     "verdictUnknown": "没能判断",
     "until": "解除时间",
     "replyTitle": "SpamBot 的回答原文",
-    "checkedAt": "检测时间"
+    "checkedAt": "检测时间",
+    "verdictFrozen": "已冻结"
   }
 }

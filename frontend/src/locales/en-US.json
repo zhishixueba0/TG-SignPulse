@@ -357,7 +357,8 @@
     "restrictionFree": "Normal",
     "restrictionLimited": "Partially bidirectional",
     "restrictionBanned": "Mutual contacts only",
-    "restrictionUnknown": "Unknown"
+    "restrictionUnknown": "Unknown",
+    "restrictionFrozen": "Frozen"
   },
   "proxies": {
     "title": "Proxies",
@@ -1841,6 +1842,7 @@
     "verdictUnknown": "Could not determine",
     "until": "Lifted at",
     "replyTitle": "SpamBot reply (original)",
-    "checkedAt": "Checked at"
+    "checkedAt": "Checked at",
+    "verdictFrozen": "Frozen"
   }
 }
