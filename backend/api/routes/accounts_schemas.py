@@ -97,6 +97,12 @@ class AccountInfo(BaseModel):
     proxy_id: Optional[str] = None
     proxy_label: Optional[str] = None
     added_at: Optional[str] = None
+    # 注册日期第一步：user_id 离线估计（只到月；表外账号 source 为
+    # bound_after/bound_before，month 为表边界月，卡片显示“之后/之前”，
+    # 绝不把钳制值当估计月）
+    registered_est_month: Optional[str] = None
+    registered_est_source: Optional[str] = None
+    registered_est_checked_at: Optional[str] = None
     # 自定义顺序（Batch 2）与暂停标志（Batch 5）
     sort_order: Optional[int] = None
     paused: bool = False

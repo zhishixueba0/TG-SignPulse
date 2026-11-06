@@ -123,6 +123,11 @@ export interface AccountInfo {
   proxy_id?: string | null;
   proxy_label?: string | null;
   added_at?: string | null;
+  /** 注册日期第一步：user_id 离线估计（只到月，"YYYY-MM"；表外账号 source 为 bound_after/bound_before，month 为表边界月） */
+  registered_est_month?: string | null;
+  /** 估计来源：user_id（表内估计）/ bound_after（表外，显示“之后”）/ bound_before（表外，显示“之前”） */
+  registered_est_source?: string | null;
+  registered_est_checked_at?: string | null;
   /** 自定义顺序（Batch 2，服务端持久化）与暂停标志（Batch 5） */
   sort_order?: number | null;
   paused?: boolean;

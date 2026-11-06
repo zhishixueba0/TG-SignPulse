@@ -192,6 +192,11 @@ const handleSave = async (confirmed = false) => {
           >
         </div>
       </div>
+
+      <div v-if="account.raw.added_at" class="flex gap-1.5 text-sm pt-1 border-t border-[var(--sp-border)]">
+        <span class="text-[var(--sp-text-muted)] shrink-0">{{ t('editAccount.addedAt') }}：</span>
+        <span class="text-[var(--sp-text-secondary)]">{{ account.raw.added_at.slice(0, 10) }}</span>
+      </div>
     </div>
 
     <template #footer>

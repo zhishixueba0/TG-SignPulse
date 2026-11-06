@@ -40,10 +40,17 @@ import {
   type AccountStatusFilter,
 } from '../lib/account-list-map'
 import { copyToClipboard } from '../lib/clipboard'
+import { registrationDisplay } from '../lib/registration-estimate'
 import { storageGet, storageSet } from '../lib/safe-storage'
 
 const formatDateTime = (s: string | null | undefined): string =>
   s ? s.slice(0, 16).replace('T', ' ') : ''
+
+/** 注册日期第一步：卡片注册行文案与悬停说明（见 src/lib/registration-estimate.ts）。 */
+const registrationText = (acc: AccountUiItem): string =>
+  registrationDisplay(acc.raw, t, locale.value === 'en').text
+const registrationTitle = (acc: AccountUiItem): string =>
+  registrationDisplay(acc.raw, t, locale.value === 'en').title
 
 /** 账号卡代理行文案：指定代理名 / 直连 / 自定义线路 / 继承全局代理 */
 const proxyLineLabel = (acc: AccountUiItem): string => {
@@ -55,7 +62,7 @@ const proxyLineLabel = (acc: AccountUiItem): string => {
 }
 
 const router = useRouter()
-const { t } = useI18n()
+const { t, locale } = useI18n()
 const toast = useToast()
 const { confirm } = useConfirm()
 const accountsStore = useAccountsStore()
@@ -872,7 +879,7 @@ const handleExportSession = (acc: AccountUiItem) => {
         </div>
         <div class="flex gap-1.5">
           <span class="text-[var(--sp-text-muted)] shrink-0">{{ t('accounts.registeredAt') }}：</span>
-          <span class="text-[var(--sp-text-secondary)] truncate">{{ acc.raw.added_at ? acc.raw.added_at.slice(0, 10) : t('accounts.registeredUnknown') }}</span>
+          <span class="text-[var(--sp-text-secondary)] truncate" :title="registrationTitle(acc)">{{ registrationText(acc) }}</span>
         </div>
         <div class="flex gap-1.5 items-start">
           <span class="text-[var(--sp-text-muted)] shrink-0">{{ t('accounts.tags') }}：</span>

@@ -179,10 +179,25 @@ class TelegramAccountsMixin:
         面板添加时间（老账号没有，返回 None）；proxy_* 来自代理绑定。
         """
         from backend.services.telegram.proxy_store import get_account_proxy_binding
+        from backend.utils.registration_estimate import estimate_registration_month
 
         binding = get_account_proxy_binding(account_name)
         identity = get_account_session_identity(account_name) or {}
         dc_id = identity.get("dc_id")
+        # 注册日期第一步：user_id 离线估计（纯函数，零新增调用）。
+        # 表外账号只给“之后/之前”（source=bound_after/bound_before），
+        # 绝不把钳制值当估计月。
+        user_id = identity.get("user_id") or profile.get("user_id")
+        est_month, est_status = estimate_registration_month(user_id)
+        est_source = (
+            "user_id"
+            if est_status == "aprox"
+            else (
+                "bound_after"
+                if est_status == "newer_than"
+                else ("bound_before" if est_status == "older_than" else None)
+            )
+        )
         return {
             "name": account_name,
             "session_file": str(session_file),
@@ -193,7 +208,7 @@ class TelegramAccountsMixin:
             "tags": profile.get("tags") or [],
             "device_family": profile.get("device_family"),
             "device_profile": profile.get("device_profile"),
-            "user_id": identity.get("user_id") or profile.get("user_id"),
+            "user_id": user_id,
             "dc_id": dc_id,
             "dc_location": dc_location_label(dc_id),
             "phone": profile.get("phone"),
@@ -203,6 +218,9 @@ class TelegramAccountsMixin:
             "proxy_id": binding.get("proxy_id"),
             "proxy_label": binding.get("proxy_label") or binding["effective_label"],
             "added_at": profile.get("created_at"),
+            "registered_est_month": est_month,
+            "registered_est_source": est_source,
+            "registered_est_checked_at": utc_now_iso_z() if est_month else None,
             # 自定义顺序（Batch 2，None=尚未回填）与暂停标志（Batch 5）
             "sort_order": profile.get("sort_order"),
             "paused": bool(profile.get("paused", False)),
