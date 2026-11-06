@@ -211,7 +211,9 @@ class TelegramAccountsMixin:
             "user_id": user_id,
             "dc_id": dc_id,
             "dc_location": dc_location_label(dc_id),
-            "phone": profile.get("phone"),
+            # 手机号：profile 缓存优先，缺失时用 session 里 peers 表缓存的本人号码
+            # （有效会话本地就有，不用等 get_me）。
+            "phone": profile.get("phone") or identity.get("phone"),
             "username": profile.get("username"),
             "first_name": profile.get("first_name"),
             "proxy_mode": binding["mode"],

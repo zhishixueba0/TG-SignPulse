@@ -356,7 +356,7 @@ const saveRename = async () => {
   const token = getAuthToken()
   const target = renameTarget.value
   const label = renameLabel.value.trim()
-  if (!token || !target || !label) return
+  if (!token || !target) return
   renameSaving.value = true
   try {
     const res = await renameProxy(token, target.id, label)
@@ -1262,6 +1262,7 @@ const saveRoute = async () => {
         <div class="space-y-1.5">
           <label class="ui-label" for="proxy-rename-label">{{ t('proxies.renameLabel') }}</label>
           <input id="proxy-rename-label" v-model="renameLabel" type="text" class="ui-input">
+          <p class="text-xs text-[var(--sp-text-muted)]">{{ t('proxies.renameEmptyHint') }}</p>
         </div>
       </div>
       <template #footer>
@@ -1271,7 +1272,7 @@ const saveRoute = async () => {
         <button
           type="button"
           class="ui-btn-primary !px-4 !py-2"
-          :disabled="renameSaving || !renameLabel.trim()"
+          :disabled="renameSaving"
           @click="saveRename"
         >
           {{ t('common.save') }}

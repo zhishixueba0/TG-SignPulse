@@ -211,11 +211,8 @@ async def rename_proxy(
     request: ProxyRenameRequest,
     current_user: User = Depends(get_current_user),
 ):
+    # 名字允许留空：留空时按已存归属地自动命名（见 proxy_store.rename_proxy）。
     label = (request.label or "").strip()
-    if not label:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail="备注不能为空"
-        )
     row = proxy_store.rename_proxy(proxy_id, label)
     if row is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="代理不存在")

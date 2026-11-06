@@ -398,9 +398,12 @@ def set_account_identity(
 
 
 def get_account_session_identity(account_name: str) -> Optional[dict]:
-    """从 .session SQLite 的 sessions 表读 dc_id / user_id（只读，不连 Telegram）。
+    """从 .session SQLite 读 dc_id / user_id / phone（只读，不连 Telegram）。
 
-    读不到（无 sessions 表、未登录）返回 None，调用方按字段缺失处理。
+    dc_id / user_id 来自 sessions 表；phone 来自 peers 表里本人
+    （id=user_id，type='user'）的 phone_number 缓存——有效会话本地就有，
+    不用等 get_me 跑完。任一读不到返回对应字段为 None，调用方按字段缺失处理。
+    老格式 session 可能没有 peers 表/列，读不到就留空，不报错。
     """
     import sqlite3
 
@@ -413,16 +416,30 @@ def get_account_session_identity(account_name: str) -> Optional[dict]:
         return None
     try:
         row = conn.execute("SELECT dc_id, user_id FROM sessions").fetchone()
+        if not row:
+            return None
+        dc_id, user_id = row
+        if not user_id:
+            return None
+        phone = None
+        try:
+            peer = conn.execute(
+                "SELECT phone_number FROM peers WHERE id=? AND type='user'",
+                (int(user_id),),
+            ).fetchone()
+            if peer and peer[0]:
+                phone = str(peer[0])
+        except Exception:
+            phone = None
     except Exception:
         return None
     finally:
         conn.close()
-    if not row:
-        return None
-    dc_id, user_id = row
-    if not user_id:
-        return None
-    return {"dc_id": int(dc_id) if dc_id is not None else None, "user_id": int(user_id)}
+    return {
+        "dc_id": int(dc_id) if dc_id is not None else None,
+        "user_id": int(user_id),
+        "phone": phone,
+    }
 
 
 # DC 位置：DC1/DC3 迈阿密，DC2/DC4 阿姆斯特丹，DC5 新加坡

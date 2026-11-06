@@ -399,6 +399,7 @@
     "delete": "Delete",
     "renameTitle": "Rename proxy",
     "renameLabel": "Name",
+    "renameEmptyHint": "Leave empty to auto-name by country/region and IP type",
     "renameSuccess": "Renamed",
     "renameFailed": "Rename failed",
     "deleteConfirmTitle": "Delete proxy",

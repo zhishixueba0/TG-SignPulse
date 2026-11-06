@@ -134,6 +134,35 @@ def test_canonical_url_roundtrip(memory_session_local):
     assert proxy_dict["scheme"] == "mtproxy"
 
 
+def test_rename_empty_label_auto_names_from_geo(memory_session_local):
+    """重命名留空：按已存归属地自动命名（旗帜-地区-IP类型），不是报错。"""
+    row = proxy_store.create_proxy(
+        ptype="http", host="6.6.6.8", port=8080, label="old-name"
+    )
+    proxy_store.update_proxy_enrichment(row.id, country_code="DE", is_hosting=True)
+    result = proxy_store.rename_proxy(row.id, "   ")
+    assert result is not None
+    assert result["label"] == "🇩🇪-DE-机房"
+    # 同地区第二条自动加序号
+    row2 = proxy_store.create_proxy(
+        ptype="http", host="6.6.6.9", port=8080, label="old-name-2"
+    )
+    proxy_store.update_proxy_enrichment(row2.id, country_code="DE", is_hosting=True)
+    result2 = proxy_store.rename_proxy(row2.id, "")
+    assert result2 is not None
+    assert result2["label"] == "🇩🇪-DE-机房-02"
+    # 没有归属地时先用占位名（补全时再自动改名），不报错
+    row3 = proxy_store.create_proxy(
+        ptype="http", host="6.6.6.10", port=8080, label="old-name-3"
+    )
+    result3 = proxy_store.rename_proxy(row3.id, "")
+    assert result3 is not None
+    assert result3["label"] == "其他-未知"
+    # 代理不存在仍返回 None（路由层据此报 404）
+    assert proxy_store.rename_proxy("no-such-id", "") is None
+    assert proxy_store.rename_proxy("no-such-id", "x") is None
+
+
 def test_build_proxy_share_link(memory_session_local):
     """卡片“复制链接”：MTProto 给 tg://proxy 链接（含 secret），其余给完整 URL。"""
     mt = proxy_store.create_proxy(

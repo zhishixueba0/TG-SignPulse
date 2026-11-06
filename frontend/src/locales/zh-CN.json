@@ -399,6 +399,7 @@
     "delete": "删",
     "renameTitle": "重命名代理",
     "renameLabel": "名称",
+    "renameEmptyHint": "留空则按国家/地区与 IP 类型自动命名",
     "renameSuccess": "已重命名",
     "renameFailed": "重命名失败",
     "deleteConfirmTitle": "删除代理",

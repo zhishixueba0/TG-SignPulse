@@ -423,14 +423,23 @@ def reset_accounts_bound_to(proxy_id: str) -> list[str]:
 
 
 def rename_proxy(proxy_id: str, label: str) -> Optional[dict]:
+    """重命名代理。名字留空时按已存归属地自动命名（旗帜-地区-IP类型，
+    如 🇩🇪-DE-机房）；尚未补归属地时先用“其他-未知”占位，补全时再自动改名。
+    返回 None 仅表示代理不存在。"""
     label = (label or "").strip()
-    if not label:
-        return None
     counts = accounts_count_by_proxy()
     with _db() as db:
         row = db.query(Proxy).filter(Proxy.id == proxy_id).first()
         if row is None:
             return None
+        if not label:
+            labels = [r.label or "" for r in db.query(Proxy).all()]
+            label = region_name(
+                row.country_code,
+                row.is_hosting,
+                existing_labels=labels,
+                exclude_label=row.label,
+            )
         row.label = label
         db.commit()
         db.refresh(row)
