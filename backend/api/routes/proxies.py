@@ -222,6 +222,19 @@ async def rename_proxy(
     return {"success": True, "proxy": row}
 
 
+@router.get("/{proxy_id}/link")
+async def get_proxy_link(proxy_id: str, current_user: User = Depends(get_current_user)):
+    """取单个代理的可分享节点链接（卡片“复制链接”用）。
+
+    按需单条返回：MTProto 返回 tg://proxy 链接（含 secret），其余返回完整 URL。
+    列表响应仍不含任何凭据，secret 只在用户明确点复制某一条时才返回这一条。
+    """
+    row = proxy_store.get_proxy_row(proxy_id)
+    if row is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="代理不存在")
+    return {"link": proxy_store.build_proxy_share_link(row)}
+
+
 # ---------- 探测 ----------
 
 

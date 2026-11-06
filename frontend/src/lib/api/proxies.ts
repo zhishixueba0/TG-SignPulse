@@ -94,6 +94,11 @@ export interface TestProxyResponse {
   tcp_ok?: boolean
 }
 
+/** 卡片“复制链接”：后端按需返回单条节点的可分享链接（MTProto 为 tg://proxy 链接）。 */
+export interface ProxyLinkResponse {
+  link: string
+}
+
 /** 检测 / 清理类后台任务进度 */
 export interface ProxyJobProgress {
   status: ProxyJobStatus
@@ -192,6 +197,9 @@ export const testProxy = (token: string, id: string) =>
   request<TestProxyResponse>(`/proxies/${encodeURIComponent(id)}/test`, {
     method: "POST",
   }, token)
+
+export const getProxyLink = (token: string, id: string) =>
+  request<ProxyLinkResponse>(`/proxies/${encodeURIComponent(id)}/link`, {}, token)
 
 export const startTestAllProxies = (token: string, mode: "probe" | "tcp" = "probe") =>
   request<{ success: boolean; started: boolean }>("/proxies/test-all", {

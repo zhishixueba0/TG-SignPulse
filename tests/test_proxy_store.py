@@ -134,6 +134,42 @@ def test_canonical_url_roundtrip(memory_session_local):
     assert proxy_dict["scheme"] == "mtproxy"
 
 
+def test_build_proxy_share_link(memory_session_local):
+    """卡片“复制链接”：MTProto 给 tg://proxy 链接（含 secret），其余给完整 URL。"""
+    mt = proxy_store.create_proxy(
+        ptype="mtproto",
+        host="9.9.9.9",
+        port=8443,
+        secret="ddfedcba9876543210fedcba98765432",
+        label="mt-share",
+    )
+    link = proxy_store.build_proxy_share_link(mt)
+    assert link.startswith("tg://proxy?")
+    assert "server=9.9.9.9" in link
+    assert "port=8443" in link
+    assert "secret=ddfedcba9876543210fedcba98765432" in link
+    # 粘贴导入能认回这个链接，且解析回同一条 mtproto URL
+    from backend.utils.mtproxy import parse_mtproxy_link
+
+    assert (
+        parse_mtproxy_link(link)
+        == "mtproto://ddfedcba9876543210fedcba98765432@9.9.9.9:8443"
+    )
+    http_row = proxy_store.create_proxy(
+        ptype="http", host="6.6.6.6", port=8080, label="h-share"
+    )
+    assert proxy_store.build_proxy_share_link(http_row) == "http://6.6.6.6:8080"
+    auth_row = proxy_store.create_proxy(
+        ptype="http",
+        host="6.6.6.7",
+        port=8080,
+        username="u",
+        password="p",
+        label="ha-share",
+    )
+    assert proxy_store.build_proxy_share_link(auth_row) == "http://u:p@6.6.6.7:8080"
+
+
 @pytest.mark.asyncio
 async def test_sync_skips_invalid_mtproto_secret(memory_session_local, monkeypatch):
     """订阅源里混进一个非法 MTProto secret 时，整轮同步不能报错中断。

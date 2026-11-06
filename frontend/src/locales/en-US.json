@@ -388,6 +388,8 @@
     "unreachable": "Down",
     "untested": "Untested",
     "test": "Test",
+    "copyLink": "Copy link",
+    "copyLinkFailed": "Failed to copy link",
     "rename": "Rename",
     "delete": "Delete",
     "renameTitle": "Rename proxy",

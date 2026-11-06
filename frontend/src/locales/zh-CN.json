@@ -388,6 +388,8 @@
     "unreachable": "不通",
     "untested": "未测",
     "test": "测",
+    "copyLink": "复制链接",
+    "copyLinkFailed": "复制链接失败",
     "rename": "改名",
     "delete": "删",
     "renameTitle": "重命名代理",

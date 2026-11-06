@@ -276,6 +276,21 @@ def canonical_display_url(row: Proxy) -> str:
     return f"{row.ptype}://{row.host}:{row.port}"
 
 
+def build_proxy_share_link(row: Proxy) -> str:
+    """用户点卡片“复制链接”时返回的可分享节点链接（按需单条返回，不进列表响应）。
+
+    MTProto 用 tg://proxy 链接（粘贴导入与 Telegram 都认，secret 经 urlencode）；
+    其余类型用完整 URL（含用户名/密码，与粘贴导入接受的格式一致）。
+    """
+    if row.ptype == "mtproto":
+        secret = _decrypt(row.secret) or ""
+        qs = urllib.parse.urlencode(
+            {"server": row.host, "port": row.port, "secret": secret}
+        )
+        return f"tg://proxy?{qs}"
+    return canonical_url(row)
+
+
 def proxy_dict_for_row(row: Proxy) -> Optional[dict]:
     return build_proxy_dict(canonical_url(row))
 

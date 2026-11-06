@@ -20,6 +20,7 @@ import {
   deleteProxy,
   renameProxy,
   testProxy,
+  getProxyLink,
   startTestAllProxies,
   getTestAllProxiesJob,
   startCleanupBlockedProxies,
@@ -47,6 +48,7 @@ import { useConfirm } from '../composables/useConfirm'
 import Modal from '../components/Modal.vue'
 import PageRetry from '../components/PageRetry.vue'
 import { notifyApiError } from '../lib/notify'
+import { copyToClipboard } from '../lib/clipboard'
 import { getLocalizedErrorMessage } from '../lib/types'
 import { countryName, flagImageUrl } from '../lib/country-names'
 import { devLog } from '../lib/devLog'
@@ -302,8 +304,26 @@ onUnmounted(() => {
   stopPolling(syncPoll)
 })
 
-/** ─── 单个代理：测 / 改名 / 删 ─── */
+/** ─── 单个代理：测 / 改名 / 删 / 复制链接 ─── */
 const testingId = ref('')
+const copyingLinkId = ref('')
+
+/** 卡片“复制链接”：向后端按需取单条节点链接（MTProto 为 tg://proxy 链接）再复制。 */
+const handleCopyProxyLink = async (p: ProxyItem) => {
+  const token = getAuthToken()
+  if (!token || copyingLinkId.value) return
+  copyingLinkId.value = p.id
+  try {
+    const res = await getProxyLink(token, p.id)
+    if (await copyToClipboard(res.link)) toast.success(t('common.copied'))
+    else toast.error(t('proxies.copyLinkFailed'))
+  } catch (e: unknown) {
+    notifyApiError(e, 'proxies.copyLinkFailed')
+  } finally {
+    copyingLinkId.value = ''
+  }
+}
+
 const handleTestProxy = async (p: ProxyItem) => {
   const token = getAuthToken()
   if (!token || testingId.value) return
@@ -1097,6 +1117,14 @@ const saveRoute = async () => {
                   <template v-if="p.has_secret">· {{ t('proxies.hasSecret') }}</template>
                 </span>
                 <span class="flex items-center gap-1">
+                  <button
+                    type="button"
+                    class="ui-btn-secondary !px-2.5 !py-1.5 !text-xs cursor-pointer"
+                    :disabled="copyingLinkId === p.id"
+                    @click="handleCopyProxyLink(p)"
+                  >
+                    {{ t('proxies.copyLink') }}
+                  </button>
                   <button
                     type="button"
                     class="ui-btn-secondary !px-2.5 !py-1.5 !text-xs cursor-pointer"
