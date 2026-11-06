@@ -379,8 +379,23 @@ const goChats = (name: string) => {
 
 /** 卡片“···”菜单：同一时刻只开一个；点菜单外任意处或按 Esc 关闭 */
 const openMenuName = ref<string | null>(null)
-const toggleMenu = (name: string) => {
-  openMenuName.value = openMenuName.value === name ? null : name
+/** 菜单展开方向：下方空间不够放 12 项时改向上展开，避免被视口底边裁掉 */
+const menuUp = ref(false)
+const toggleMenu = (name: string, event?: MouseEvent) => {
+  if (openMenuName.value === name) {
+    openMenuName.value = null
+    return
+  }
+  openMenuName.value = name
+  menuUp.value = false
+  const target = event?.currentTarget as HTMLElement | undefined
+  const rect = target?.getBoundingClientRect()
+  if (rect) {
+    // 12 项菜单约 440px 高（ capped 于 70vh）；下方放不下且上方更宽敞时向上展开
+    const below = window.innerHeight - rect.bottom
+    const above = rect.top
+    if (below < 440 && above > below) menuUp.value = true
+  }
 }
 const closeMenu = () => {
   openMenuName.value = null
@@ -773,11 +788,11 @@ const handleExportSession = (acc: AccountUiItem) => {
               <span>{{ t('accounts.deleteBtn') }}</span>
             </button>
             <div class="relative">
-              <button type="button" class="ui-btn-secondary !px-2 !py-1.5 !text-xs inline-flex items-center gap-1 cursor-pointer" :aria-expanded="openMenuName === acc.name" :aria-label="t('accounts.moreActions')" :title="t('accounts.moreActions')" @click="toggleMenu(acc.name)">
+              <button type="button" class="ui-btn-secondary !px-2 !py-1.5 !text-xs inline-flex items-center gap-1 cursor-pointer" :aria-expanded="openMenuName === acc.name" :aria-label="t('accounts.moreActions')" :title="t('accounts.moreActions')" @click="toggleMenu(acc.name, $event)">
                 <MoreHorizontal class="w-3.5 h-3.5" />
               </button>
               <div v-if="openMenuName === acc.name" class="fixed inset-0 z-40" aria-hidden="true" @click="closeMenu" />
-              <div v-if="openMenuName === acc.name" class="absolute right-0 top-full mt-1 z-50 min-w-44 max-h-[70vh] overflow-y-auto ui-card p-1 shadow-[var(--sp-shadow-md)]" role="menu">
+              <div v-if="openMenuName === acc.name" :class="menuUp ? 'absolute right-0 bottom-full mb-1 z-50 min-w-44 max-h-[70vh] overflow-y-auto ui-card p-1 shadow-[var(--sp-shadow-md)]' : 'absolute right-0 top-full mt-1 z-50 min-w-44 max-h-[70vh] overflow-y-auto ui-card p-1 shadow-[var(--sp-shadow-md)]'" role="menu">
                 <button type="button" role="menuitem" class="ui-menu-item" @click="handleRelogin(acc.name)">{{ t('accounts.relogin') }}</button>
                 <button type="button" role="menuitem" class="ui-menu-item" @click="handleRefreshProfile(acc)">{{ t('accounts.refreshProfile') }}</button>
                 <button type="button" role="menuitem" class="ui-menu-item" @click="openTagsModal(acc, 'edit')">{{ t('accounts.editTags') }}</button>
@@ -798,7 +813,7 @@ const handleExportSession = (acc: AccountUiItem) => {
       <div v-else class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-4">
     <div
       v-for="acc in filteredAccounts" :key="acc.id"
-      class="ui-card ui-card-hover ui-contain-account group relative flex flex-col p-5"
+      class="ui-card ui-card-hover group relative flex flex-col p-5"
     >
       <div class="flex justify-between items-start mb-4">
         <div class="flex items-center gap-3 truncate max-w-[70%]">
@@ -840,11 +855,11 @@ const handleExportSession = (acc: AccountUiItem) => {
             <span class="truncate">{{ t('accounts.pausedBadge') }}</span>
           </span>
           <div class="relative shrink-0">
-            <button type="button" class="ui-btn-secondary !px-1.5 !py-1.5 !text-xs inline-flex items-center cursor-pointer" :aria-expanded="openMenuName === acc.name" :aria-label="t('accounts.moreActions')" :title="t('accounts.moreActions')" @click="toggleMenu(acc.name)">
+            <button type="button" class="ui-btn-secondary !px-1.5 !py-1.5 !text-xs inline-flex items-center cursor-pointer" :aria-expanded="openMenuName === acc.name" :aria-label="t('accounts.moreActions')" :title="t('accounts.moreActions')" @click="toggleMenu(acc.name, $event)">
               <MoreHorizontal class="w-3.5 h-3.5" />
             </button>
             <div v-if="openMenuName === acc.name" class="fixed inset-0 z-40" aria-hidden="true" @click="closeMenu" />
-            <div v-if="openMenuName === acc.name" class="absolute right-0 top-full mt-1 z-50 min-w-44 max-h-[70vh] overflow-y-auto ui-card p-1 shadow-[var(--sp-shadow-md)]" role="menu">
+            <div v-if="openMenuName === acc.name" :class="menuUp ? 'absolute right-0 bottom-full mb-1 z-50 min-w-44 max-h-[70vh] overflow-y-auto ui-card p-1 shadow-[var(--sp-shadow-md)]' : 'absolute right-0 top-full mt-1 z-50 min-w-44 max-h-[70vh] overflow-y-auto ui-card p-1 shadow-[var(--sp-shadow-md)]'" role="menu">
               <button type="button" role="menuitem" class="ui-menu-item" @click="handleRelogin(acc.name)">{{ t('accounts.relogin') }}</button>
               <button type="button" role="menuitem" class="ui-menu-item" @click="handleRefreshProfile(acc)">{{ t('accounts.refreshProfile') }}</button>
               <button type="button" role="menuitem" class="ui-menu-item" @click="openTagsModal(acc, 'edit')">{{ t('accounts.editTags') }}</button>
