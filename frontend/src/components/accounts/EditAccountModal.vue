@@ -4,7 +4,7 @@ import Modal from '../Modal.vue'
 import AccountImpactModal from './AccountImpactModal.vue'
 import { previewAccountChange, applyAccountChange, listDeviceProfiles, type AccountChangePlan, type DeviceProfilePreset } from '../../lib/api/accounts'
 import { updateAccount } from '../../lib/api'
-import { listProxies, type ProxyItem, type ProxyMode } from '../../lib/api/proxies'
+import { listProxies, proxyOptionLabel, type ProxyItem, type ProxyMode } from '../../lib/api/proxies'
 import { getAuthToken } from '../../lib/api/core'
 import { useI18n } from '../../composables/useI18n'
 import { useToast } from '../../composables/useToast'
@@ -233,7 +233,7 @@ const handleSave = async (confirmed = false) => {
             class="ui-input"
           >
             <option value="" disabled>{{ t('editAccount.proxySelectPlaceholder') }}</option>
-            <option v-for="p in poolProxies" :key="p.id" :value="p.id">{{ p.label }} — {{ p.display_url }}</option>
+            <option v-for="p in poolProxies" :key="p.id" :value="p.id">{{ proxyOptionLabel(p) }}</option>
           </select>
           <label class="flex items-center gap-2 text-sm text-[var(--sp-text)] cursor-pointer">
             <input v-model="form.proxyMode" type="radio" value="custom" class="!w-auto">

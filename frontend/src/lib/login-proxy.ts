@@ -4,7 +4,7 @@
  * 指定池代理 / 自定义 URL。选了池代理只传 proxy_id（真实 URL 不出
  * 后端）；选了不存在的代理后端返回 404，绝不静默直连。
  */
-import type { ProxyItem } from './api/proxies'
+import { proxyOptionLabel, type ProxyItem } from './api/proxies'
 
 export type LoginProxyMode = 'inherit' | 'direct' | 'pool' | 'custom'
 
@@ -30,8 +30,7 @@ export function loginProxyPayload(
   return { proxy_mode: mode }
 }
 
-/** 池代理下拉展示：名称 · 掩码地址（地区）。不含任何凭据。 */
+/** 池代理下拉展示：自定义名 · 接入 IP · 协议 · ASN 机构。不含任何凭据与链接。 */
 export function poolProxyOptionLabel(item: ProxyItem): string {
-  const region = item.country_code ? ` (${item.country_code})` : ''
-  return `${item.label} · ${item.display_url}${region}`
+  return proxyOptionLabel(item)
 }

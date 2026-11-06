@@ -39,6 +39,18 @@ export interface ProxyItem {
   resolved_at: string | null
 }
 
+/** 选代理下拉展示：自定义名 · 接入 IP · 协议 · ASN 机构。不含链接。
+ * IP 接入直接显示 IP，域名接入显示解析出的 IP；还没解析出 IP 时退回 host。
+ * 机构优先 org，其次 isp，再次 announced_asn；都没有就不显示这一段。 */
+export function proxyOptionLabel(item: ProxyItem): string {
+  const ip = item.resolved_ip || item.host || ''
+  const proto = (item.ptype || '').toUpperCase()
+  const org = item.org || item.isp || item.announced_asn || ''
+  const parts = item.label ? [item.label, ip, proto] : [ip, proto]
+  if (org) parts.push(org)
+  return parts.filter(Boolean).join(' · ')
+}
+
 export interface ProxyListResponse {
   proxies: ProxyItem[]
   total: number

@@ -33,6 +33,7 @@ import {
   updateProxyRoute,
   setGlobalProxy,
   testGlobalProxy,
+  proxyOptionLabel,
   type ProxyItem,
   type ProxyRoute,
   type ProxyMode,
@@ -1338,7 +1339,7 @@ const saveRoute = async () => {
           <label class="ui-label" for="route-proxy-select">{{ t('proxies.routePool') }}</label>
           <select id="route-proxy-select" v-model="routeProxyId" class="ui-input">
             <option value="" disabled>{{ t('proxies.routeSelectPlaceholder') }}</option>
-            <option v-for="p in proxies" :key="p.id" :value="p.id">{{ p.label }} — {{ p.display_url }}</option>
+            <option v-for="p in proxies" :key="p.id" :value="p.id">{{ proxyOptionLabel(p) }}</option>
           </select>
         </div>
         <p v-if="routeTarget" class="text-xs text-[var(--sp-text-muted)]">
