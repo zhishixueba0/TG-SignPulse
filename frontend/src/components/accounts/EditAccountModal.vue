@@ -4,7 +4,7 @@ import Modal from '../Modal.vue'
 import AccountImpactModal from './AccountImpactModal.vue'
 import { previewAccountChange, applyAccountChange, listDeviceProfiles, type AccountChangePlan, type DeviceProfilePreset } from '../../lib/api/accounts'
 import { updateAccount } from '../../lib/api'
-import { listProxies, proxyOptionLabel, type ProxyItem, type ProxyMode } from '../../lib/api/proxies'
+import { listProxies, proxyOptionLabel, sortProxyOptions, type ProxyItem, type ProxyMode } from '../../lib/api/proxies'
 import { getAuthToken } from '../../lib/api/core'
 import { useI18n } from '../../composables/useI18n'
 import { useToast } from '../../composables/useToast'
@@ -44,6 +44,9 @@ const loading = ref(false)
 const error = ref('')
 const poolProxies = ref<ProxyItem[]>([])
 const poolFailed = ref(false)
+const poolLoading = ref(false)
+/** 下拉选项按名称字母排序（去旗帜后比较） */
+const sortedPoolProxies = computed(() => sortProxyOptions(poolProxies.value))
 const deviceFamilies = ref<Record<string, DeviceProfilePreset[]>>({})
 const deviceLoadFailed = ref(false)
 
@@ -78,6 +81,7 @@ const currentDeviceLabel = computed(() => {
 const loadPool = async () => {
   const token = getAuthToken()
   if (!token) return
+  poolLoading.value = true
   try {
     poolFailed.value = false
     const res = await listProxies(token)
@@ -86,6 +90,8 @@ const loadPool = async () => {
     // 代理池加载失败：退回自由文本输入，不阻塞编辑
     poolFailed.value = true
     poolProxies.value = []
+  } finally {
+    poolLoading.value = false
   }
 }
 
@@ -144,7 +150,7 @@ const handleSave = async (confirmed = false) => {
     // 代理线路：pool → proxy_id，custom → proxy（自由文本），inherit/direct → 两者都清空
     const proxyMode: ProxyMode = poolFailed.value ? 'custom' : form.value.proxyMode
     // 设备指纹：不选族 = 不改；选族 + 随机 = 只传族（后端族内随机）；
-    // 选族 + 指定预设 = 传族与完整画像。账号在线时后端返回 409。
+    // 选族 + 指定预设 = 传族与完整画像。账号正忙时后端返回 409。
     const deviceFamily = form.value.deviceFamily || null
     let deviceProfile: DeviceProfilePreset | null = null
     if (deviceFamily && form.value.devicePreset !== 'random') {
@@ -165,7 +171,7 @@ const handleSave = async (confirmed = false) => {
     emit('success')
     emit('close')
   } catch (e: unknown) {
-    // 账号在线时后端返回 409：原样展示后端文案
+    // 账号正忙时后端返回 409：原样展示后端文案
     error.value = getLocalizedErrorMessage(e, t, t('editAccount.saveFailed'))
   } finally {
     loading.value = false
@@ -224,7 +230,7 @@ const handleSave = async (confirmed = false) => {
             {{ t('editAccount.proxyModeDirect') }}
           </label>
           <label class="flex items-center gap-2 text-sm text-[var(--sp-text)] cursor-pointer">
-            <input v-model="form.proxyMode" type="radio" value="pool" class="!w-auto" :disabled="poolProxies.length === 0">
+            <input v-model="form.proxyMode" type="radio" value="pool" class="!w-auto" :disabled="!poolLoading && poolProxies.length === 0">
             {{ t('editAccount.proxyModePool') }}
           </label>
           <select
@@ -233,7 +239,7 @@ const handleSave = async (confirmed = false) => {
             class="ui-input"
           >
             <option value="" disabled>{{ t('editAccount.proxySelectPlaceholder') }}</option>
-            <option v-for="p in poolProxies" :key="p.id" :value="p.id">{{ proxyOptionLabel(p) }}</option>
+            <option v-for="p in sortedPoolProxies" :key="p.id" :value="p.id">{{ proxyOptionLabel(p) }}</option>
           </select>
           <label class="flex items-center gap-2 text-sm text-[var(--sp-text)] cursor-pointer">
             <input v-model="form.proxyMode" type="radio" value="custom" class="!w-auto">

@@ -17,7 +17,7 @@ import {
   submitPasskeyPassword,
 } from '../../lib/api'
 import { getAuthToken } from '../../lib/api/core'
-import { listProxies, type ProxyItem } from '../../lib/api/proxies'
+import { listProxies, sortProxyOptions, type ProxyItem } from '../../lib/api/proxies'
 import { loginProxyPayload, poolProxyOptionLabel, type LoginProxyMode } from '../../lib/login-proxy'
 import { useI18n } from '../../composables/useI18n'
 import { useToast } from '../../composables/useToast'
@@ -98,10 +98,14 @@ const proxyMode = ref<LoginProxyMode>('inherit')
 const proxyId = ref('')
 const poolProxies = ref<ProxyItem[]>([])
 const poolFailed = ref(false)
+const poolLoading = ref(false)
+/** 下拉选项按名称字母排序（去旗帜后比较） */
+const sortedPoolProxies = computed(() => sortProxyOptions(poolProxies.value))
 
 const loadPool = async () => {
   const token = getAuthToken()
   if (!token) return
+  poolLoading.value = true
   try {
     poolFailed.value = false
     const res = await listProxies(token)
@@ -110,6 +114,8 @@ const loadPool = async () => {
     // 代理池加载失败：退回自由文本输入，不阻塞登录
     poolFailed.value = true
     poolProxies.value = []
+  } finally {
+    poolLoading.value = false
   }
 }
 
@@ -847,7 +853,7 @@ onUnmounted(() => {
             {{ t('addAccount.proxyModeDirect') }}
           </label>
           <label class="flex items-center gap-1.5 text-xs text-[var(--sp-text-secondary)] cursor-pointer">
-            <input v-model="proxyMode" type="radio" value="pool" class="!w-auto" :disabled="poolProxies.length === 0">
+            <input v-model="proxyMode" type="radio" value="pool" class="!w-auto" :disabled="!poolLoading && poolProxies.length === 0">
             {{ t('addAccount.proxyModePool') }}
           </label>
           <label class="flex items-center gap-1.5 text-xs text-[var(--sp-text-secondary)] cursor-pointer">
@@ -863,7 +869,7 @@ onUnmounted(() => {
           :aria-label="t('addAccount.proxyModePool')"
         >
           <option value="" disabled>{{ t('addAccount.proxySelectPlaceholder') }}</option>
-          <option v-for="p in poolProxies" :key="p.id" :value="p.id">
+          <option v-for="p in sortedPoolProxies" :key="p.id" :value="p.id">
             {{ poolProxyOptionLabel(p) }}
           </option>
         </select>

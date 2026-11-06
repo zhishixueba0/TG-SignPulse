@@ -34,6 +34,7 @@ import {
   setGlobalProxy,
   testGlobalProxy,
   proxyOptionLabel,
+  sortProxyOptions,
   type ProxyItem,
   type ProxyRoute,
   type ProxyMode,
@@ -179,6 +180,9 @@ const groups = computed<ProxyGroup[]>(() => {
   }
   return big
 })
+
+/** 路由选代理下拉：按名称字母排序（去旗帜后比较） */
+const sortedProxies = computed(() => sortProxyOptions(proxies.value))
 
 const formatTime = (s: string | null | undefined): string =>
   s ? s.slice(0, 16).replace('T', ' ') : ''
@@ -1339,7 +1343,7 @@ const saveRoute = async () => {
           <label class="ui-label" for="route-proxy-select">{{ t('proxies.routePool') }}</label>
           <select id="route-proxy-select" v-model="routeProxyId" class="ui-input">
             <option value="" disabled>{{ t('proxies.routeSelectPlaceholder') }}</option>
-            <option v-for="p in proxies" :key="p.id" :value="p.id">{{ proxyOptionLabel(p) }}</option>
+            <option v-for="p in sortedProxies" :key="p.id" :value="p.id">{{ proxyOptionLabel(p) }}</option>
           </select>
         </div>
         <p v-if="routeTarget" class="text-xs text-[var(--sp-text-muted)]">

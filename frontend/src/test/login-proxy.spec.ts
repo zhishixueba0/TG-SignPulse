@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { loginProxyPayload, poolProxyOptionLabel } from '../lib/login-proxy'
+import { sortProxyOptions } from '../lib/api/proxies'
 import type { ProxyItem } from '../lib/api/proxies'
 
 describe('login-proxy', () => {
@@ -57,5 +58,25 @@ describe('login-proxy', () => {
     expect(poolProxyOptionLabel(unresolved)).toBe(
       '德国-1 · example.com · MTPROTO · Hetzner Online GmbH',
     )
+  })
+
+  it('下拉按去旗帜后的名称字母排序，旗帜不显示', () => {
+    const flagged = {
+      id: 'f',
+      label: '🇩🇪-DE-机房-12',
+      ptype: 'mtproto',
+      host: '1.1.1.1',
+      resolved_ip: '1.1.1.1',
+      org: null,
+      isp: null,
+      announced_asn: null,
+    } as ProxyItem
+    expect(poolProxyOptionLabel(flagged)).toBe('DE-机房-12 · 1.1.1.1 · MTPROTO')
+    const items = [
+      { ...flagged, id: 'a', label: '🇸🇬-SG-机房' },
+      { ...flagged, id: 'b', label: '🇩🇪-DE-机房-12' },
+      { ...flagged, id: 'c', label: '🇮🇳-IN-ISP' },
+    ] as ProxyItem[]
+    expect(sortProxyOptions(items).map((p) => p.id)).toEqual(['b', 'c', 'a'])
   })
 })

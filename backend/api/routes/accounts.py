@@ -1328,7 +1328,7 @@ async def update_account(
             ):
                 raise HTTPException(
                     status_code=status.HTTP_409_CONFLICT,
-                    detail="账号在线时不能更换线路，请先断开连接再试",
+                    detail="账号正忙（正在执行操作），请稍后再试",
                 )
             proxy_mode_to_save = target_mode
             proxy_id_to_save = target_proxy_id

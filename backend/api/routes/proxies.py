@@ -485,7 +485,7 @@ async def set_route(
     if changed and proxy_store.is_account_online(account_name):
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="账号在线时不能更换线路，请先断开连接再试",
+            detail="账号正忙（正在执行操作），请稍后再试",
         )
     set_account_profile(
         account_name,

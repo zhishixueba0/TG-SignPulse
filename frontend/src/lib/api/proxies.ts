@@ -39,14 +39,29 @@ export interface ProxyItem {
   resolved_at: string | null
 }
 
+/** 下拉排序键：去掉名称开头的旗帜 emoji 再比较。
+ * 旗帜在原生 select 里显示不出来，还会干扰字母排序，所以排序与显示都去掉它。 */
+export function proxyOptionSortKey(item: ProxyItem): string {
+  return (item.label || '').replace(/^[\u{1F1E6}-\u{1F1FF}]{2}[\s-]*/u, '')
+}
+
+/** 下拉选项按名称字母排序后的副本（不改原数组）。 */
+export function sortProxyOptions(items: ProxyItem[]): ProxyItem[] {
+  return [...items].sort((a, b) =>
+    proxyOptionSortKey(a).localeCompare(proxyOptionSortKey(b), 'en'),
+  )
+}
+
 /** 选代理下拉展示：自定义名 · 接入 IP · 协议 · ASN 机构。不含链接。
  * IP 接入直接显示 IP，域名接入显示解析出的 IP；还没解析出 IP 时退回 host。
- * 机构优先 org，其次 isp，再次 announced_asn；都没有就不显示这一段。 */
+ * 机构优先 org，其次 isp，再次 announced_asn；都没有就不显示这一段。
+ * 名称开头的旗帜 emoji 去掉（原生 select 里显示不出来）。 */
 export function proxyOptionLabel(item: ProxyItem): string {
   const ip = item.resolved_ip || item.host || ''
   const proto = (item.ptype || '').toUpperCase()
   const org = item.org || item.isp || item.announced_asn || ''
-  const parts = item.label ? [item.label, ip, proto] : [ip, proto]
+  const label = proxyOptionSortKey(item)
+  const parts = label ? [label, ip, proto] : [ip, proto]
   if (org) parts.push(org)
   return parts.filter(Boolean).join(' · ')
 }

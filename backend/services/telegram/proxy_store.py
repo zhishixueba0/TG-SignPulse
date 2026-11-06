@@ -693,13 +693,13 @@ def set_account_proxy_binding(
     proxy_id: Optional[str] = None,
     proxy_url: Optional[str] = None,
 ) -> dict:
-    """设置账号代理绑定。在线账号拒绝修改（先断开再改）。"""
+    """设置账号代理绑定。账号正忙（有操作正在用它）时拒绝修改，稍后再试。"""
     mode = (mode or "").strip().lower()
     if mode not in PROXY_MODES:
         raise ValueError(f"proxy_mode 必须是 {PROXY_MODES} 之一")
     if is_account_online(account_name):
         raise RuntimeError(
-            "ONLINE_PROXY_CHANGE_BLOCKED: 账号当前在线，改代理前请先断开连接"
+            "ONLINE_PROXY_CHANGE_BLOCKED: 账号正忙（正在执行操作），请稍后再试"
         )
     if mode == "pool":
         if not proxy_id:
