@@ -181,7 +181,7 @@ class AccountUpdateRequest(BaseModel):
     def validate_family(cls, v):
         if v is not None:
             val = str(v).strip().lower()
-            allowed = ("desktop", "android", "macos", "ios")
+            allowed = ("desktop", "android", "macos", "ios", "linux")
             if val not in allowed:
                 raise ValueError(f"device_family must be one of {allowed}")
             return val

@@ -559,6 +559,25 @@ async def import_session(
         )
 
 
+@router.get("/device-profiles")
+def list_device_profiles(current_user: User = Depends(get_current_user)):
+    """设备指纹预设列表（编辑账号时选择用）。
+
+    返回各设备族（desktop / android / macos / ios / linux）的预设画像，
+    每条含 device_model / system_version / app_version / lang_code /
+    system_lang_code。前端不硬编码预设，后端改了这里自动跟上。
+    """
+    from backend.services.telegram.device_profiles import DEVICE_PROFILES
+
+    return {
+        "success": True,
+        "families": {
+            family: [dict(profile) for profile in presets]
+            for family, presets in DEVICE_PROFILES.items()
+        },
+    }
+
+
 @router.get("", response_model=AccountListResponse)
 def list_accounts(current_user: User = Depends(get_current_user)):
     """

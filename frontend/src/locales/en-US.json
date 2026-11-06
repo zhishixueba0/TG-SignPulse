@@ -265,6 +265,7 @@
     "phone": "Phone",
     "userId": "User ID",
     "dc": "DC",
+    "device": "Device",
     "viewCard": "Cards",
     "viewList": "List",
     "dcFilterAll": "All data centers",
@@ -1636,7 +1637,19 @@
     "proxyModeCustom": "Custom proxy URL",
     "proxySelectPlaceholder": "Select a proxy",
     "proxyCustomPlaceholder": "socks5://...",
-    "proxyLoadFailed": "Failed to load proxies, switched to manual input"
+    "proxyLoadFailed": "Failed to load proxies, switched to manual input",
+    "deviceLabel": "Device fingerprint",
+    "deviceCurrent": "Current device",
+    "deviceNotSet": "Not set (default)",
+    "deviceKeep": "Keep unchanged",
+    "deviceFamilyDesktop": "Windows Desktop",
+    "deviceFamilyMacos": "macOS",
+    "deviceFamilyAndroid": "Android",
+    "deviceFamilyLinux": "Linux",
+    "deviceFamilyIos": "iOS",
+    "devicePresetRandom": "Random (any preset in this family)",
+    "deviceLoadFailed": "Failed to load device presets",
+    "deviceOfflineHint": "Disconnect the account first; the new fingerprint applies on next connect"
   },
   "common": {
     "cancel": "Cancel",

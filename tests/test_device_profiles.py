@@ -30,7 +30,7 @@ pytest_plugins = ("tests.test_api",)
 
 def test_get_random_profile_matches_family_preset():
     """验证从指定 family 中随机获取的画像符合预设结构与规范。"""
-    for family in ("desktop", "android", "macos", "ios"):
+    for family in ("desktop", "android", "macos", "ios", "linux"):
         profile = get_random_profile(family)
         assert profile is not None
         assert profile.get("device_family") == family
@@ -43,6 +43,36 @@ def test_get_random_profile_matches_family_preset():
         # 验证机型在预设池中
         models = [p["device_model"] for p in DEVICE_PRESET_POOL[family]]
         assert profile["device_model"] in models
+        # 预设本身必须能通过校验（不跨族）
+        validate_device_profile(profile)
+
+
+def test_linux_profile_validates_and_distinct_from_windows():
+    """Linux 预设：PC 64bit + Ubuntu/Debian 应判为 linux 族，且与 Windows 不冲突。"""
+    linux_profile = {
+        "device_family": "linux",
+        "device_model": "PC 64bit",
+        "system_version": "Ubuntu 24.04",
+        "app_version": "5.4.1 x64",
+        "lang_code": "en",
+        "system_lang_code": "en-US",
+    }
+    validated = validate_device_profile(linux_profile)
+    assert validated["device_family"] == "linux"
+    assert validated["device_model"] == "PC 64bit"
+
+    # 同一型号配 Windows 系统应判为 desktop，不是 linux
+    windows_profile = dict(linux_profile)
+    windows_profile["device_family"] = "desktop"
+    windows_profile["system_version"] = "Windows 11"
+    validated_win = validate_device_profile(windows_profile)
+    assert validated_win["device_family"] == "desktop"
+
+    # Linux 机型标成 desktop 族应拒绝（系统与族冲突）
+    mismatch = dict(linux_profile)
+    mismatch["device_family"] = "desktop"
+    with pytest.raises(ValueError, match="Cross-family"):
+        validate_device_profile(mismatch)
 
 
 def test_validate_device_profile_rejects_cross_family_mismatch():

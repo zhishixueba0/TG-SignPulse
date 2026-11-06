@@ -877,6 +877,10 @@ const handleExportSession = (acc: AccountUiItem) => {
           <span class="text-[var(--sp-text-muted)] shrink-0">{{ t('accounts.dc') }}：</span>
           <span class="text-[var(--sp-text-secondary)] truncate">DC {{ acc.raw.dc_id }}<template v-if="acc.raw.dc_location"> · {{ acc.raw.dc_location }}</template></span>
         </div>
+        <div v-if="acc.raw.device_profile" class="flex gap-1.5">
+          <span class="text-[var(--sp-text-muted)] shrink-0">{{ t('accounts.device') }}：</span>
+          <span class="text-[var(--sp-text-secondary)] truncate">{{ acc.raw.device_profile.device_model }} · {{ acc.raw.device_profile.system_version }}</span>
+        </div>
         <div class="flex gap-1.5">
           <span class="text-[var(--sp-text-muted)] shrink-0">{{ t('accounts.registeredAt') }}：</span>
           <span class="text-[var(--sp-text-secondary)] truncate" :title="registrationTitle(acc)">{{ registrationText(acc) }}</span>

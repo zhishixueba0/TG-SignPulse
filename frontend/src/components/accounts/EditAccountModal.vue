@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import Modal from '../Modal.vue'
 import AccountImpactModal from './AccountImpactModal.vue'
-import { previewAccountChange, applyAccountChange, type AccountChangePlan } from '../../lib/api/accounts'
+import { previewAccountChange, applyAccountChange, listDeviceProfiles, type AccountChangePlan, type DeviceProfilePreset } from '../../lib/api/accounts'
 import { updateAccount } from '../../lib/api'
 import { listProxies, type ProxyItem, type ProxyMode } from '../../lib/api/proxies'
 import { getAuthToken } from '../../lib/api/core'
@@ -35,11 +35,43 @@ const form = ref({
   proxyMode: 'inherit' as ProxyModeOption,
   proxyId: '',
   proxyUrl: '',
+  deviceFamily: '',
+  devicePreset: 'random',
 })
 const loading = ref(false)
 const error = ref('')
 const poolProxies = ref<ProxyItem[]>([])
 const poolFailed = ref(false)
+const deviceFamilies = ref<Record<string, DeviceProfilePreset[]>>({})
+const deviceLoadFailed = ref(false)
+
+const loadDeviceProfiles = async () => {
+  const token = getAuthToken()
+  if (!token) return
+  try {
+    deviceLoadFailed.value = false
+    const res = await listDeviceProfiles(token)
+    deviceFamilies.value = res.families || {}
+  } catch {
+    // 预设加载失败：设备指纹区不可选，不阻塞编辑
+    deviceLoadFailed.value = true
+    deviceFamilies.value = {}
+  }
+}
+
+const currentDevicePresets = computed(() => {
+  if (!form.value.deviceFamily) return []
+  return deviceFamilies.value[form.value.deviceFamily] || []
+})
+
+const currentDeviceLabel = computed(() => {
+  const raw = props.account?.raw
+  const profile = raw?.device_profile
+  if (!profile) return ''
+  return [profile.device_model, profile.system_version, profile.app_version]
+    .filter(Boolean)
+    .join(' · ')
+})
 
 const loadPool = async () => {
   const token = getAuthToken()
@@ -71,9 +103,12 @@ watch(() => props.isOpen, (val) => {
           : 'inherit',
       proxyId: raw.proxy_id || '',
       proxyUrl: raw.proxy || '',
+      deviceFamily: '',
+      devicePreset: 'random',
     }
     error.value = ''
     void loadPool()
+    void loadDeviceProfiles()
   }
 })
 
@@ -98,12 +133,23 @@ const handleSave = async (confirmed = false) => {
     }
     // 代理线路：pool → proxy_id，custom → proxy（自由文本），inherit/direct → 两者都清空
     const proxyMode: ProxyMode = poolFailed.value ? 'custom' : form.value.proxyMode
+    // 设备指纹：不选族 = 不改；选族 + 随机 = 只传族（后端族内随机）；
+    // 选族 + 指定预设 = 传族与完整画像。账号在线时后端返回 409。
+    const deviceFamily = form.value.deviceFamily || null
+    let deviceProfile: DeviceProfilePreset | null = null
+    if (deviceFamily && form.value.devicePreset !== 'random') {
+      const idx = Number(form.value.devicePreset)
+      const preset = currentDevicePresets.value[idx]
+      if (preset) deviceProfile = preset
+    }
     await updateAccount(token, accountName, {
       new_account_name: null,
       remark: form.value.remark || null,
       proxy_mode: proxyMode,
       proxy_id: proxyMode === 'pool' ? (form.value.proxyId || null) : null,
       proxy: proxyMode === 'custom' ? (form.value.proxyUrl.trim() || null) : null,
+      device_family: deviceFamily,
+      device_profile: deviceProfile,
     })
     toast.success(t('editAccount.saveSuccess'))
     emit('success')
@@ -191,6 +237,37 @@ const handleSave = async (confirmed = false) => {
             class="ui-input"
           >
         </div>
+      </div>
+
+      <div class="space-y-1.5">
+        <span class="ui-label">{{ t('editAccount.deviceLabel') }}</span>
+        <p class="text-xs text-[var(--sp-text-muted)]">
+          {{ t('editAccount.deviceCurrent') }}：{{ currentDeviceLabel || t('editAccount.deviceNotSet') }}
+        </p>
+        <select v-model="form.deviceFamily" class="ui-input" @change="form.devicePreset = 'random'">
+          <option value="">{{ t('editAccount.deviceKeep') }}</option>
+          <option value="desktop">{{ t('editAccount.deviceFamilyDesktop') }}</option>
+          <option value="macos">{{ t('editAccount.deviceFamilyMacos') }}</option>
+          <option value="android">{{ t('editAccount.deviceFamilyAndroid') }}</option>
+          <option value="linux">{{ t('editAccount.deviceFamilyLinux') }}</option>
+          <option value="ios">{{ t('editAccount.deviceFamilyIos') }}</option>
+        </select>
+        <div v-if="form.deviceFamily && !deviceLoadFailed" class="space-y-2 pt-1">
+          <label class="flex items-center gap-2 text-sm text-[var(--sp-text)] cursor-pointer">
+            <input v-model="form.devicePreset" type="radio" value="random" class="!w-auto">
+            {{ t('editAccount.devicePresetRandom') }}
+          </label>
+          <label
+            v-for="(preset, idx) in currentDevicePresets"
+            :key="idx"
+            class="flex items-center gap-2 text-sm text-[var(--sp-text)] cursor-pointer"
+          >
+            <input v-model="form.devicePreset" type="radio" :value="String(idx)" class="!w-auto">
+            {{ preset.device_model }} · {{ preset.system_version }} · {{ preset.app_version }}
+          </label>
+        </div>
+        <p v-if="deviceLoadFailed" class="text-xs text-[var(--sp-text-muted)]">{{ t('editAccount.deviceLoadFailed') }}</p>
+        <p v-if="form.deviceFamily" class="text-xs text-[var(--sp-text-muted)]">{{ t('editAccount.deviceOfflineHint') }}</p>
       </div>
 
       <div v-if="account.raw.added_at" class="flex gap-1.5 text-sm pt-1 border-t border-[var(--sp-border)]">

@@ -406,6 +406,20 @@ export const resumeAccount = (token: string, accountName: string) =>
     token,
   );
 
+export interface DeviceProfilePreset {
+  device_model: string;
+  system_version: string;
+  app_version: string;
+  lang_code: string;
+  system_lang_code: string;
+}
+
+export const listDeviceProfiles = (token: string) =>
+  request<{
+    success: boolean;
+    families: Record<string, DeviceProfilePreset[]>;
+  }>("/accounts/device-profiles", {}, token);
+
 export const updateAccount = (
   token: string,
   accountName: string,

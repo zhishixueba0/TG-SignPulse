@@ -11,10 +11,10 @@ from __future__ import annotations
 import random
 from typing import Any, Literal, Optional
 
-DeviceFamily = Literal["desktop", "android", "macos", "ios"]
+DeviceFamily = Literal["desktop", "android", "macos", "ios", "linux"]
 
 DEFAULT_DEVICE_FAMILY: DeviceFamily = "desktop"
-VALID_DEVICE_FAMILIES = ("desktop", "android", "macos", "ios")
+VALID_DEVICE_FAMILIES = ("desktop", "android", "macos", "ios", "linux")
 REQUIRED_DEVICE_PROFILE_KEYS = (
     "device_model",
     "system_version",
@@ -74,6 +74,22 @@ DEVICE_PROFILES: dict[str, list[dict[str, str]]] = {
             "system_lang_code": "en-US",
         },
     ],
+    "linux": [
+        {
+            "device_model": "PC 64bit",
+            "system_version": "Ubuntu 24.04",
+            "app_version": "5.4.1 x64",
+            "lang_code": "en",
+            "system_lang_code": "en-US",
+        },
+        {
+            "device_model": "PC 64bit",
+            "system_version": "Debian 12",
+            "app_version": "5.5.0 x64",
+            "lang_code": "zh-hans",
+            "system_lang_code": "zh-CN",
+        },
+    ],
 }
 
 DEVICE_PRESET_POOL = DEVICE_PROFILES
@@ -99,8 +115,13 @@ def _detect_model_family(model: str) -> Optional[str]:
         return "macos"
     if any(k in m for k in ("samsung", "xiaomi", "sm-", "redmi", "pixel", "android")):
         return "android"
-    if "pc" in m or "windows" in m or "linux" in m:
+    if "linux" in m:
+        return "linux"
+    if "windows" in m:
         return "desktop"
+    # "PC 64bit" 是 Telegram Desktop 在 Windows 与 Linux 上的通用型号，
+    # 本身不锁定系统族，由 system_version 区分（Windows 10/11 → desktop，
+    # Ubuntu/Debian → linux），这里返回 None 交给系统端判断。
     return None
 
 
@@ -112,7 +133,21 @@ def _detect_system_family(system: str) -> Optional[str]:
         return "macos"
     if "sdk" in s or "android" in s:
         return "android"
-    if "windows" in s or "win" in s or "linux" in s:
+    if any(
+        k in s
+        for k in (
+            "linux",
+            "ubuntu",
+            "debian",
+            "fedora",
+            "arch",
+            "centos",
+            "mint",
+            "opensuse",
+        )
+    ):
+        return "linux"
+    if "windows" in s or "win" in s:
         return "desktop"
     return None
 
