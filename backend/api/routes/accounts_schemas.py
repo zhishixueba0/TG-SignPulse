@@ -121,7 +121,7 @@ class SpamCheckResponse(BaseModel):
     success: bool = True
     account_name: str
     status: str  # free | limited | banned | unknown
-    bidirectional: str  # both | mutual_only | blocked | unknown
+    bidirectional: str  # both | partial | mutual_only | unknown
     bidirectional_label: str
     summary: str
     message: str  # SpamBot 回答原文

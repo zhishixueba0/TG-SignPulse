@@ -4,9 +4,9 @@
 判断账号能不能主动私聊陌生人（双向）。
 
 分类规则（James 2026-11-05 实测 + 2026-11-06 确认，开头优先）：
-- free as a bird / no limits / good news → free（正常，双向收发）
-- Unfortunately 开头 → limited（部分双向，仅互加可发）
-- Sorry / I'm sorry 开头 → banned（双向冻结/全限制，不能发）
+- free as a bird / no limits / good news → free（正常，无限制）
+- Unfortunately 开头 → limited（部分双向，只能给特定区域的用户随意互发）
+- Sorry / I'm sorry 开头 → banned（双向，必须是双向联系人才可以互发）
 - blocked / banned / terminated / 被封 → banned
 - 含 limit / 限制 → limited（兜底）
 - 其他 → unknown
@@ -53,20 +53,20 @@ def classify_spam_reply(text: str) -> tuple[str, str]:
     low = (text or "").lower()
     stripped = low.strip()
     if stripped.startswith("unfortunately"):
-        return "limited", "部分限制：SpamBot 回复以 Unfortunately 开头，一般是部分限制"
+        return "limited", "部分双向：只能给特定区域的用户随意互发"
     if (
         stripped.startswith("sorry")
         or stripped.startswith("i'm sorry")
         or stripped.startswith("i am sorry")
     ):
-        return "banned", "完全限制：SpamBot 回复以 Sorry 开头，一般是全限制"
+        return "banned", "双向：必须是双向联系人才可以互发"
     if (
         "no limits" in low
         or "free as a bird" in low
         or "good news" in low
         or "没有限制" in (text or "")
     ):
-        return "free", "自由：当前没有限制"
+        return "free", "正常：无限制"
     if (
         "blocked" in low
         or "banned" in low
@@ -74,27 +74,27 @@ def classify_spam_reply(text: str) -> tuple[str, str]:
         or "被封" in (text or "")
         or "已被封禁" in (text or "")
     ):
-        return "banned", "完全限制：账号已被封禁 / 终止"
+        return "banned", "双向：必须是双向联系人才可以互发"
     if "limit" in low or "限制" in (text or ""):
-        return "limited", "部分限制：账号受到限制（通常只能发给互加联系人等）"
+        return "limited", "部分双向：只能给特定区域的用户随意互发"
     return "unknown", "未知：SpamBot 回复里没有明确的限制关键词，请看原文判断"
 
 
 def bidirectional_of(status: str) -> tuple[str, str]:
-    """把 SpamBot 状态映射为双向能力。
+    """把 SpamBot 状态映射为双向能力（James 2026-11-06 定义）。
 
     返回 (bidirectional, label)：
-    - free → both（双向收发）
-    - limited → mutual_only（仅互加可发）
-    - banned → blocked（不能发 / 已冻结）
+    - free → both（正常，无限制）
+    - limited → partial（部分双向，只能给特定区域的用户随意互发）
+    - banned → mutual_only（双向，必须是双向联系人才可以互发）
     - unknown → unknown（未测）
     """
     if status == "free":
-        return "both", "双向收发"
+        return "both", "正常"
     if status == "limited":
-        return "mutual_only", "仅互加可发（受限，不能发给陌生人）"
+        return "partial", "部分双向"
     if status == "banned":
-        return "blocked", "不能发 / 已冻结"
+        return "mutual_only", "双向"
     return "unknown", "未测"
 
 

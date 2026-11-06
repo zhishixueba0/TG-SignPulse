@@ -21,8 +21,8 @@ const freeResult = {
   account_name: 'acc-a',
   status: 'free',
   bidirectional: 'both',
-  bidirectional_label: '双向收发',
-  summary: '自由：当前没有限制',
+  bidirectional_label: '正常',
+  summary: '正常：无限制',
   message: "Good news, no limits are currently applied to your account. You're free as a bird!",
   until: null,
   checked_at: '2026-11-06T06:00:00Z',
@@ -31,9 +31,9 @@ const freeResult = {
 const limitedResult = {
   ...freeResult,
   status: 'limited',
-  bidirectional: 'mutual_only',
-  bidirectional_label: '仅互加可发',
-  summary: '部分限制：SpamBot 回复以 Unfortunately 开头，一般是部分限制',
+  bidirectional: 'partial',
+  bidirectional_label: '部分双向',
+  summary: '部分双向：只能给特定区域的用户随意互发',
   message: 'Unfortunately, some actions on your account are limited.',
 }
 

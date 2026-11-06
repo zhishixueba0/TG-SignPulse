@@ -355,8 +355,8 @@
     "restriction": "Limits",
     "restrictionNotChecked": "Not checked",
     "restrictionFree": "Normal",
-    "restrictionLimited": "One-way limited",
-    "restrictionBanned": "Banned",
+    "restrictionLimited": "Partially bidirectional",
+    "restrictionBanned": "Mutual contacts only",
     "restrictionUnknown": "Unknown"
   },
   "proxies": {
@@ -1835,9 +1835,9 @@
     "running": "Asking {'@'}SpamBot, this takes up to a dozen seconds…",
     "runningHint": "Waited {seconds}s",
     "checkFailed": "Check failed, please try again later",
-    "verdictFree": "No limits applied",
-    "verdictLimited": "One-way limited",
-    "verdictBanned": "Account judged banned",
+    "verdictFree": "Normal, no limits",
+    "verdictLimited": "Partially bidirectional",
+    "verdictBanned": "Mutual contacts only",
     "verdictUnknown": "Could not determine",
     "until": "Lifted at",
     "replyTitle": "SpamBot reply (original)",

@@ -391,7 +391,7 @@ export interface SpamCheckResult {
   success: boolean;
   account_name: string;
   status: "free" | "limited" | "banned" | "unknown" | string;
-  bidirectional: "both" | "mutual_only" | "blocked" | "unknown" | string;
+  bidirectional: "both" | "partial" | "mutual_only" | "unknown" | string;
   bidirectional_label: string;
   summary: string;
   message: string;

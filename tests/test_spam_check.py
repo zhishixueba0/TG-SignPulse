@@ -73,15 +73,17 @@ class TestBidirectionalOf:
     def test_free_is_both(self):
         bidir, label = bidirectional_of("free")
         assert bidir == "both"
-        assert "双向" in label
+        assert label == "正常"
 
-    def test_limited_is_mutual_only(self):
-        bidir, _ = bidirectional_of("limited")
+    def test_limited_is_partial(self):
+        bidir, label = bidirectional_of("limited")
+        assert bidir == "partial"
+        assert label == "部分双向"
+
+    def test_banned_is_mutual_only(self):
+        bidir, label = bidirectional_of("banned")
         assert bidir == "mutual_only"
-
-    def test_banned_is_blocked(self):
-        bidir, _ = bidirectional_of("banned")
-        assert bidir == "blocked"
+        assert label == "双向"
 
     def test_unknown_is_unknown(self):
         bidir, _ = bidirectional_of("unknown")

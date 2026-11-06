@@ -355,8 +355,8 @@
     "restriction": "限制",
     "restrictionNotChecked": "未检测",
     "restrictionFree": "正常",
-    "restrictionLimited": "单向受限",
-    "restrictionBanned": "封禁",
+    "restrictionLimited": "部分双向",
+    "restrictionBanned": "双向",
     "restrictionUnknown": "未知"
   },
   "proxies": {
@@ -1835,9 +1835,9 @@
     "running": "正在询问 {'@'}SpamBot，最多要十几秒…",
     "runningHint": "已等待 {seconds} 秒",
     "checkFailed": "检测失败，请稍后再试",
-    "verdictFree": "没有受到限制",
-    "verdictLimited": "单向受限",
-    "verdictBanned": "账号被判定为封禁",
+    "verdictFree": "正常，无限制",
+    "verdictLimited": "部分双向",
+    "verdictBanned": "双向",
     "verdictUnknown": "没能判断",
     "until": "解除时间",
     "replyTitle": "SpamBot 的回答原文",
