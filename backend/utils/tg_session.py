@@ -45,6 +45,26 @@ def get_global_semaphore() -> asyncio.Semaphore:
     return _GLOBAL_SEMAPHORE
 
 
+async def mark_client_online(client: Any, account_name: str = "") -> bool:
+    """登录瞬间显式向 Telegram 刷一次在线状态（best-effort，失败不影响登录）。
+
+    只在客户端已连接时调用（update_status(offline=False) 即 account.UpdateStatus）；
+    调用后由调用方按原流程断开连接，服务器会把最后上线时间记为断开时刻。
+    连接本身已能让服务器看到在线，但短连接有时来不及登记，显式发一次更稳。
+    """
+    try:
+        if not getattr(client, "is_connected", False):
+            return False
+        update_status = getattr(client, "update_status", None)
+        if update_status is None:
+            return False
+        await asyncio.wait_for(update_status(offline=False), timeout=10)
+        return True
+    except Exception as exc:
+        _logger.debug("刷新在线状态失败 %s: %s", account_name or "?", exc)
+        return False
+
+
 def _resolve_concurrency_limit() -> int:
     # Priority: env var > global settings > default 1
     raw = (os.getenv("TG_GLOBAL_CONCURRENCY") or "").strip()

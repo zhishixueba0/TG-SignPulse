@@ -20,6 +20,7 @@ from backend.utils.account_locks import AccountLockLease, get_account_lock
 from backend.utils.tg_session import (
     get_global_semaphore,
     get_session_mode,
+    mark_client_online,
     save_session_string_file,
     set_account_session_string,
 )
@@ -368,6 +369,8 @@ class TelegramPhoneLoginMixin:
                     # 登录成功，获取用户信息
                     # get_me 走超时保护：网络挂起时登录接口不能无限等待
                     me = await asyncio.wait_for(client.get_me(), timeout=10)
+                    # 登录瞬间显式刷一次在线状态，让服务器把最后上线记为此刻
+                    await mark_client_online(client, account_name)
                     await self._persist_client_session(
                         client, account_name, proxy, proxy_id, proxy_mode
                     )
@@ -394,6 +397,8 @@ class TelegramPhoneLoginMixin:
                     try:
                         await client.check_password(password)
                         me = await asyncio.wait_for(client.get_me(), timeout=10)
+                        # 登录瞬间显式刷一次在线状态，让服务器把最后上线记为此刻
+                        await mark_client_online(client, account_name)
                         await self._persist_client_session(
                             client, account_name, proxy, proxy_id, proxy_mode
                         )

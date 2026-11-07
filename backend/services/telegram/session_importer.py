@@ -40,6 +40,7 @@ from backend.utils.names import validate_storage_name
 from backend.utils.tg_session import (
     get_global_semaphore,
     list_account_names,
+    mark_client_online,
     set_account_profile,
 )
 
@@ -503,6 +504,8 @@ async def verify_imported_session(
         async with get_global_semaphore():
             await client.connect()
             me = await client.get_me()
+            # 导入即上线：显式刷一次在线状态，让服务器把最后上线记为此刻
+            await mark_client_online(client, account_name)
     except Exception as exc:
         _cleanup_file_and_aux(temp_session_path)
         raise ValueError("IMPORTED_SESSION_UNAUTHORIZED") from exc

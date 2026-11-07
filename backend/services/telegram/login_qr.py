@@ -20,6 +20,7 @@ from backend.utils.account_locks import AccountLockLease, get_account_lock
 from backend.utils.tg_session import (
     get_global_semaphore,
     get_session_mode,
+    mark_client_online,
 )
 from backend.utils.time import utc_from_timestamp_iso_z
 from tg_signer.async_utils import create_logged_task
@@ -434,6 +435,8 @@ class TelegramQrLoginMixin:
             # LoginTokenSuccess 已导入授权（user_id 已写入存储），仅凭「账号设有 2FA
             # 密码」判定会把已授权会话误报为需要密码，进而对已授权会话调用
             # check_password 导致登录失败。
+            # 登录瞬间显式刷一次在线状态，让服务器把最后上线记为此刻
+            await mark_client_online(client, data.get("account_name") or "")
             await self._apply_migrate_auth(client, data)
             await self._persist_client_session(
                 client,

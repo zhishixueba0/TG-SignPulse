@@ -126,7 +126,7 @@ watch(() => props.isOpen, (val) => {
       })
     }
   }
-})
+}, { immediate: true })
 
 const renamePlan = ref<AccountChangePlan | null>(null)
 const handleSave = async (confirmed = false) => {

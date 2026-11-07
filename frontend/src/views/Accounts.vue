@@ -331,17 +331,9 @@ const {
 
 const openEdit = (acc: AccountUiItem) => {
   editingAccount.value = acc
-  editFocusSection.value = null
   showEditModal.value = true
 }
 
-/** 卡片「···」菜单「设备指纹」直达：打开编辑弹窗并定位到指纹区 */
-const editFocusSection = ref<string | null>(null)
-const openEditDevice = (acc: AccountUiItem) => {
-  editingAccount.value = acc
-  editFocusSection.value = 'device'
-  showEditModal.value = true
-}
 
 const openDevices = (name: string) => {
   deviceAccountName.value = name
@@ -388,7 +380,6 @@ const handleRelogin = (name: string) => {
 }
 
 const onEditModalClosed = () => {
-  editFocusSection.value = null
   if (!pendingReloginName.value) return
   initialAccountName.value = pendingReloginName.value
   initialMethod.value = 'code'
@@ -748,7 +739,8 @@ const handleExportSession = (acc: AccountUiItem) => {
       <div v-else-if="viewMode === 'list'" class="ui-card divide-y divide-[var(--sp-border)]">
         <div
           v-for="acc in filteredAccounts" :key="acc.id"
-          class="flex flex-wrap items-center gap-3 px-4 py-3"
+          class="relative flex flex-wrap items-center gap-3 px-4 py-3"
+          :class="{ 'z-30': openMenuName === acc.name }"
         >
           <div class="w-9 h-9 shrink-0 bg-[var(--sp-surface-muted)] rounded-[var(--sp-radius)] flex items-center justify-center text-xs text-[var(--sp-text-muted)] font-mono border border-[var(--sp-border)] overflow-hidden">
             <img
@@ -836,12 +828,10 @@ const handleExportSession = (acc: AccountUiItem) => {
                 <button type="button" role="menuitem" class="ui-menu-item" :disabled="!moveState(acc).canMoveUp" @click="handleMove(acc, 'up')">{{ t('accounts.moveUp') }}</button>
                 <button type="button" role="menuitem" class="ui-menu-item" :disabled="!moveState(acc).canMoveDown" @click="handleMove(acc, 'down')">{{ t('accounts.moveDown') }}</button>
                 <button type="button" role="menuitem" class="ui-menu-item" @click="handlePauseToggle(acc)">{{ acc.raw.paused ? t('accounts.resumeAccount') : t('accounts.pauseAccount') }}</button>
-                <button type="button" role="menuitem" class="ui-menu-item" @click="openEdit(acc)">{{ t('accounts.nameRemarkProxy') }}</button>
-                <button type="button" role="menuitem" class="ui-menu-item" @click="openEditDevice(acc)">{{ t('accounts.deviceFingerprint') }}</button>
+
                 <button type="button" role="menuitem" class="ui-menu-item" @click="openSpamCheck(acc)">{{ t('accounts.spamCheck') }}</button>
                 <button type="button" role="menuitem" class="ui-menu-item" @click="handleExportSession(acc)">{{ t('accounts.exportSessionPackage') }}</button>
-                <button type="button" role="menuitem" class="ui-menu-item" @click="goLogs(acc.name)">{{ t('accounts.runLogs') }}</button>
-                <button type="button" role="menuitem" class="ui-menu-item" @click="openDevices(acc.name)">{{ t('accounts.devicesAndSessions') }}</button>
+
                 <button type="button" role="menuitem" class="ui-menu-item" @click="openOfficialMessages(acc.name)">{{ t('accounts.officialMessages') }}</button>
                 <button type="button" role="menuitem" class="ui-menu-item !text-rose-600 dark:!text-rose-400" @click="handleDelete(acc.name)">{{ t('accounts.deleteBtn') }}</button>
               </div>
@@ -853,6 +843,7 @@ const handleExportSession = (acc: AccountUiItem) => {
     <div
       v-for="acc in filteredAccounts" :key="acc.id"
       class="ui-card ui-card-hover group relative flex flex-col p-5"
+      :class="{ 'z-30': openMenuName === acc.name }"
     >
       <div class="flex justify-between items-start mb-4">
         <div class="flex items-center gap-3 truncate max-w-[70%]">
@@ -904,12 +895,10 @@ const handleExportSession = (acc: AccountUiItem) => {
               <button type="button" role="menuitem" class="ui-menu-item" :disabled="!moveState(acc).canMoveUp" @click="handleMove(acc, 'up')">{{ t('accounts.moveUp') }}</button>
               <button type="button" role="menuitem" class="ui-menu-item" :disabled="!moveState(acc).canMoveDown" @click="handleMove(acc, 'down')">{{ t('accounts.moveDown') }}</button>
               <button type="button" role="menuitem" class="ui-menu-item" @click="handlePauseToggle(acc)">{{ acc.raw.paused ? t('accounts.resumeAccount') : t('accounts.pauseAccount') }}</button>
-              <button type="button" role="menuitem" class="ui-menu-item" @click="openEdit(acc)">{{ t('accounts.nameRemarkProxy') }}</button>
-                <button type="button" role="menuitem" class="ui-menu-item" @click="openEditDevice(acc)">{{ t('accounts.deviceFingerprint') }}</button>
+
                 <button type="button" role="menuitem" class="ui-menu-item" @click="openSpamCheck(acc)">{{ t('accounts.spamCheck') }}</button>
               <button type="button" role="menuitem" class="ui-menu-item" @click="handleExportSession(acc)">{{ t('accounts.exportSessionPackage') }}</button>
-              <button type="button" role="menuitem" class="ui-menu-item" @click="goLogs(acc.name)">{{ t('accounts.runLogs') }}</button>
-              <button type="button" role="menuitem" class="ui-menu-item" @click="openDevices(acc.name)">{{ t('accounts.devicesAndSessions') }}</button>
+
               <button type="button" role="menuitem" class="ui-menu-item" @click="openOfficialMessages(acc.name)">{{ t('accounts.officialMessages') }}</button>
               <button type="button" role="menuitem" class="ui-menu-item !text-rose-600 dark:!text-rose-400" @click="handleDelete(acc.name)">{{ t('accounts.deleteBtn') }}</button>
             </div>
@@ -1036,7 +1025,7 @@ const handleExportSession = (acc: AccountUiItem) => {
     <AccountImpactModal :isOpen="!!changePlan" :plan="changePlan" :loading="changeLoading" :error="changeError" @close="changePlan = null" @apply="applyDelete" />
     <AccountTagsModal :isOpen="showTagsModal" :account="tagsAccount" :mode="tagsMode" @close="showTagsModal = false" @success="loadAccounts" />
     <AddAccountModal :isOpen="showAddModal" :initialMethod="initialMethod" :initialAccountName="initialAccountName" @close="showAddModal = false" @success="loadAccounts" />
-    <EditAccountModal v-if="editingAccount" :isOpen="showEditModal" :account="editingAccount" :focus-section="editFocusSection" @close="showEditModal = false" @closed="onEditModalClosed" @success="loadAccounts" @relogin="handleRelogin" />
+    <EditAccountModal v-if="editingAccount" :isOpen="showEditModal" :account="editingAccount" @close="showEditModal = false" @closed="onEditModalClosed" @success="loadAccounts" @relogin="handleRelogin" />
     <DeviceManagerModal :isOpen="showDeviceModal" :accountName="deviceAccountName" @close="showDeviceModal = false" />
     <SessionPackageModal :isOpen="showPackageModal" :accountName="packageAccountName" @close="showPackageModal = false" />
     <OfficialMessagesModal :isOpen="showOfficialMessagesModal" :accountName="officialMessagesAccountName" @close="showOfficialMessagesModal = false" />
