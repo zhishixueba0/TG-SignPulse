@@ -89,6 +89,32 @@ def _reset_global_test_state():
     _account_store_cache.clear()
 
 
+@pytest.fixture(scope="session", autouse=True)
+def _sanitize_no_proxy_for_httpx():
+    """清理 no_proxy 里的 IPv6 条目，避免 httpx 建客户端时解析失败。
+
+    沙箱/开发机环境的 no_proxy 常含 ::1、[::1] 等 IPv6 条目，httpx
+    解析 no_proxy 时会把它们当 URL 处理并报 Invalid port（':1]'），
+    导致所有建 httpx.AsyncClient 的推送测试失败。生产/VPS 与 CI 环境
+    没有这类变量，不受影响。这里只在测试会话期间剔除 IPv6 条目，
+    保留 localhost/127.0.0.1 等其余直通规则。
+    """
+    for key in ("no_proxy", "NO_PROXY"):
+        raw = os.environ.get(key)
+        if not raw:
+            continue
+        kept = [
+            part.strip()
+            for part in raw.split(",")
+            if part.strip() and "::" not in part and not part.strip().startswith("[")
+        ]
+        if kept:
+            os.environ[key] = ",".join(kept)
+        else:
+            os.environ.pop(key, None)
+    yield
+
+
 # ============================================================================
 # 环境隔离 Fixtures
 # ============================================================================
