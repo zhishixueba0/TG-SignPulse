@@ -56,12 +56,21 @@ jobs:
       # 在 starlette TestClient 处崩溃，而 CI 用新 fastapi 完全测不到）。
       # 只装 base + dev：tdata/speedup extra 不装，保持既有测试假设
       # （tests/test_tdata_importer.py 的降级用例依赖 opentele 缺失）。
+      # 安装用 uv pip（并行安装，比 pip 快），装的仍是同一份 uv export 的固定版本。
+      - name: Cache uv
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/uv
+          key: ${{ runner.os }}-uv-${{ hashFiles('uv.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-uv-
+
       - name: Install test dependencies
         run: |
           python -m pip install --upgrade pip uv
           uv export --format requirements-txt --no-hashes --extra dev --no-emit-project \
             -o /tmp/requirements.txt
-          python -m pip install -r /tmp/requirements.txt
+          uv pip install --system -r /tmp/requirements.txt
           python -m pip install --no-deps -e .
           rm -f /tmp/requirements.txt
 
