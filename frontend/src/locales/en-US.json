@@ -1492,6 +1492,8 @@
     "backupImportSuccess": "Backup archive imported successfully",
     "backupImportFailed": "Failed to import backup archive",
     "backupImportHint": "Uploading a .spbak or .tar.gz archive overwrites the current data directory. Avoid other writes during import.",
+    "backupImportPasswordLabel": "Restore password (optional)",
+    "backupImportPasswordPlaceholder": "Required for password-encrypted backups; leave blank for default encryption",
     "backupImportAction": "Restore data from archive",
     "presetJianguoyun": "Jianguoyun",
     "presetNextcloud": "Nextcloud",

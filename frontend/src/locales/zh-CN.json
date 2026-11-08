@@ -1492,6 +1492,8 @@
     "backupImportSuccess": "备份归档导入成功",
     "backupImportFailed": "备份归档导入失败",
     "backupImportHint": "上传 .spbak 或 .tar.gz 归档将覆盖当前数据目录，导入期间请勿执行其他写入操作。",
+    "backupImportPasswordLabel": "恢复密码（可选）",
+    "backupImportPasswordPlaceholder": "自定义密码加密的备份必填；默认加密的留空",
     "backupImportAction": "从归档恢复数据",
     "presetJianguoyun": "坚果云",
     "presetNextcloud": "Nextcloud",

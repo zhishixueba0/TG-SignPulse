@@ -208,6 +208,50 @@ describe('设置页拆分组件契约', () => {
     expect(wrapper.emitted('backup-download')).toBeTruthy()
   })
 
+  it('DataManagementSettings 恢复区有独立密码框，优先用它、空着回落导出密码框', async () => {
+    const wrapper = mount(DataManagementSettings, {
+      props: {
+        modelValue: settingsState(),
+        backupStatus: null,
+        remoteFiles: [],
+        remoteMessage: '',
+        remoteDownloadName: '',
+      },
+      global: { plugins: [i18n] },
+    })
+
+    const passwordInputs = wrapper.findAll('input[type="password"]')
+    const restoreInput = passwordInputs.find((i) =>
+      i.attributes('placeholder')?.includes('自定义密码加密的备份必填'),
+    )
+    expect(restoreInput).toBeTruthy()
+
+    const file = new File(['x'], 'fork-pulse-backup-test.spbak')
+    const fileInput = wrapper.find('input[type="file"]')
+    Object.defineProperty(fileInput.element, 'files', {
+      value: [file],
+      configurable: true,
+    })
+
+    // 恢复密码框有值时优先用它
+    await restoreInput?.setValue('restore-pw')
+    await fileInput.trigger('change')
+    expect(wrapper.emitted('archive-import')?.[0]?.[0]).toMatchObject({
+      password: 'restore-pw',
+    })
+
+    // 恢复密码框空着时回落到导出密码框
+    await restoreInput?.setValue('')
+    const exportInput = passwordInputs.find((i) =>
+      i.attributes('placeholder')?.includes('留空则使用系统密钥加密'),
+    )
+    await exportInput?.setValue('export-pw')
+    await fileInput.trigger('change')
+    expect(wrapper.emitted('archive-import')?.[1]?.[0]).toMatchObject({
+      password: 'export-pw',
+    })
+  })
+
   it('AboutSettings 展示灰度分流引擎来源', () => {
     const wrapper = mount(AboutSettings, {
       props: {

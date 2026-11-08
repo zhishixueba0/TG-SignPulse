@@ -65,6 +65,8 @@ const emit = defineEmits<{
 /** 完整备份归档的格式与可选自定义加密密码（由父组件转发给 API） */
 const archiveFormat = ref<'auto' | 'tar.gz' | 'spbak'>('auto')
 const archivePassword = ref('')
+/** 恢复区独立的密码框：自定义密码加密的备份必填；留空时回落到导出密码框 */
+const restorePassword = ref('')
 const archiveOptions = (): BackupArchiveOptions => ({
   format: archiveFormat.value,
   password: archivePassword.value.trim() || undefined,
@@ -78,7 +80,10 @@ const onArchiveFileChange = (e: Event) => {
   if (target.files && target.files[0]) {
     emit('archive-import', {
       file: target.files[0],
-      password: archivePassword.value.trim() || undefined,
+      password:
+        restorePassword.value.trim() ||
+        archivePassword.value.trim() ||
+        undefined,
     })
     target.value = ''
   }
@@ -610,6 +615,15 @@ const copyRestoreCommand = async () => {
         <!-- 归档恢复：上传 .spbak / .tar.gz 覆盖恢复数据目录 -->
         <div class="pt-3 border-t border-[var(--sp-border)] space-y-2">
           <p class="text-[11px] text-[var(--sp-text-muted)] leading-relaxed">{{ t('settings.backupImportHint') }}</p>
+          <label class="block">
+            <span class="text-xs font-medium text-[var(--sp-text-secondary)] dark:text-[var(--sp-text)]">{{ t('settings.backupImportPasswordLabel') }}</span>
+            <input
+              v-model="restorePassword"
+              type="password"
+              :placeholder="t('settings.backupImportPasswordPlaceholder')"
+              class="ui-input mt-1 w-full"
+            />
+          </label>
           <input
             ref="archiveFileRef"
             type="file"
