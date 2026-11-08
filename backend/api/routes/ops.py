@@ -535,7 +535,7 @@ def backup_status(current_user: User = Depends(get_current_user)):
         stat_entries: List[tuple[float, Path]] = []
         for p in [
             f
-            for f in backup_dir.glob("auto-*.*")
+            for f in backup_dir.glob("fork-pulse-auto-*.*")
             if f.name.endswith((".tar.gz", ".spbak"))
         ]:
             try:

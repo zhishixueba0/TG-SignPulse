@@ -244,7 +244,7 @@ class TestBackupPrune:
         d = tmp_path / "backups"
         d.mkdir()
         for i in range(5):
-            p = d / f"auto-2026010{i}-000000.tar.gz"
+            p = d / f"fork-pulse-auto-2026010{i}-000000.tar.gz"
             p.write_bytes(b"x")
             # 保证 mtime 顺序
             import os
@@ -252,7 +252,7 @@ class TestBackupPrune:
 
             os.utime(p, (time.time() + i, time.time() + i))
         assert prune_backups(d, 2) == 3
-        assert len(list(d.glob("auto-*.tar.gz"))) == 2
+        assert len(list(d.glob("fork-pulse-auto-*.tar.gz"))) == 2
 
     def test_create_tarball_rejects_empty(self, tmp_path: Path):
         from backend.services.backup_archive import create_backup_tarball
@@ -707,7 +707,7 @@ class TestWebdavBackupChain:
         assert result["webdav"]["success"] is True
         assert result.get("local_removed") is True
         # 上传成功后本地副本应已删除
-        assert not list((data / "backups").glob("auto-*.tar.gz"))
+        assert not list((data / "backups").glob("fork-pulse-auto-*.tar.gz"))
         assert result["path"] == "https://x/a.tar.gz"
         m.assert_called_once()
         assert m.call_args.kwargs["remote_dir"] == "bk"
@@ -737,7 +737,7 @@ class TestWebdavBackupChain:
         assert result["success"] is True
         assert result.get("local_removed") is False
         assert result["webdav"]["success"] is False
-        assert list((data / "backups").glob("auto-*.tar.gz"))
+        assert list((data / "backups").glob("fork-pulse-auto-*.tar.gz"))
 
     def test_backup_export_rejects_missing_credentials(self, client, db_session):
         client.post(

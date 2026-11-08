@@ -374,16 +374,16 @@ class TestOpsApi:
         real_glob = _Path.glob
 
         def fake_glob(self, pattern):
-            if pattern == "auto-*.tar.gz":
+            if pattern == "fork-pulse-auto-*.*":
                 # 返回一个从未落盘的“幽灵”文件：stat 时必抛 FileNotFoundError
-                return iter([self / "auto-ghost.tar.gz"])
+                return iter([self / "fork-pulse-auto-ghost.tar.gz"])
             return real_glob(self, pattern)
 
         monkeypatch.setattr(_Path, "glob", fake_glob)
         resp = client.get("/api/ops/backup/status", headers=_auth_headers())
         assert resp.status_code == 200
         names = [f["name"] for f in resp.json().get("local_auto_backups", [])]
-        assert "auto-ghost.tar.gz" not in names
+        assert "fork-pulse-auto-ghost.tar.gz" not in names
 
     def test_dir_size_cached_reuses_within_ttl(self, tmp_path):
         """全量目录大小统计走 TTL 缓存：TTL 内不重扫，过期后重新统计。"""

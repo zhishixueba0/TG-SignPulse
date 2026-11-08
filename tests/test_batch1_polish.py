@@ -102,7 +102,7 @@ def test_safe_mtime_on_nonexistent_file(tmp_path: Path):
     non_existent = tmp_path / "ghost.tar.gz"
     assert _safe_mtime(non_existent) == 0.0
 
-    f1 = tmp_path / "auto-20260101-000000.tar.gz"
+    f1 = tmp_path / "fork-pulse-auto-20260101-000000.tar.gz"
     f1.write_text("test")
     assert _safe_mtime(f1) > 0.0
 
