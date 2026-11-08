@@ -227,13 +227,29 @@ async def _start_restore_services() -> None:
 
 
 async def _activate_staged_restore(data_dir: Path, staging_dir: Path) -> None:
+    """Swap staged restore contents into data_dir.
+
+    staging_dir, the backup dir and the failed dir all live INSIDE data_dir,
+    so the restore works when data_dir is a bind mount under a read-only
+    rootfs (data_dir.parent is neither writable nor the same filesystem,
+    which makes the old whole-directory rename impossible).
+    .app_secret_key is preserved across restore: the backup never contains it,
+    and losing it would orphan every secret_key-encrypted backup.
+    """
     global _restore_maintenance
     _ensure_single_process_restore()
-    old = data_dir.parent / f".{data_dir.name}.restore-old-{uuid.uuid4().hex}"
-    failed = data_dir.parent / f".{data_dir.name}.restore-failed-{uuid.uuid4().hex}"
+    old = data_dir / f".restore-old-{uuid.uuid4().hex}"
+    failed = data_dir / f".restore-failed-{uuid.uuid4().hex}"
+    staging_name = staging_dir.name
+    old_name = old.name
+    failed_name = failed.name
+    # Entries that stay in place across the swap.
+    keep_names = {staging_name, old_name, failed_name, ".app_secret_key"}
     moved = False
     healthy = True
     _restore_maintenance = True
+    backed_names: list[str] = []
+    staged_names: list[str] = []
     try:
         # The restoring request itself occupies one slot; let existing API work finish.
         deadline = asyncio.get_running_loop().time() + 30
@@ -245,18 +261,41 @@ async def _activate_staged_restore(data_dir: Path, staging_dir: Path) -> None:
             await asyncio.sleep(0.05)
         healthy = False
         await _stop_restore_services()
-        data_dir.rename(old)
+        # 1. Move current entries (except staging/old/failed/.app_secret_key) into old.
+        old.mkdir(parents=True, exist_ok=True)
+        for entry in list(data_dir.iterdir()):
+            if entry.name in keep_names:
+                continue
+            entry.rename(old / entry.name)
+            backed_names.append(entry.name)
         moved = True
-        staging_dir.rename(data_dir)
+        # 2. Move staging contents up into data_dir.
+        for entry in list(staging_dir.iterdir()):
+            entry.rename(data_dir / entry.name)
+            staged_names.append(entry.name)
+        # 3. Remove the now-empty staging dir.
+        staging_dir.rmdir()
         await _start_restore_services()
         healthy = True
     except BaseException:
         if moved:
             # Stop any services that partially reopened against the new directory.
             await _stop_restore_services()
-            if data_dir.exists():
-                data_dir.rename(failed)
-            old.rename(data_dir)
+            # Rollback: move staged entries aside for inspection, restore old entries.
+            failed.mkdir(parents=True, exist_ok=True)
+            for name in staged_names:
+                target = data_dir / name
+                if target.exists() or target.is_symlink():
+                    target.rename(failed / name)
+            for name in backed_names:
+                src = old / name
+                if (src.exists() or src.is_symlink()) and not (
+                    data_dir / name
+                ).exists():
+                    src.rename(data_dir / name)
+            # old should be empty now; keep it only if something could not be restored.
+            if not any(old.iterdir()):
+                old.rmdir()
         if not healthy:
             await _start_restore_services()
             healthy = True
@@ -766,13 +805,12 @@ async def import_backup_archive(
             detail="仅支持导入 .spbak 或 .tar.gz 格式的备份归档",
         )
 
-    tmp_dir = Path(tempfile.mkdtemp(prefix="tg-signpulse-restore-"))
+    tmp_dir = Path(tempfile.mkdtemp(prefix="fork-pulse-restore-"))
     tmp_file = tmp_dir / "upload_archive"
-    staging_dir = Path(
-        tempfile.mkdtemp(
-            prefix=f".{data_dir.name}.restore-staging-", dir=data_dir.parent
-        )
-    )
+    # Staging lives INSIDE data_dir: data_dir.parent is not writable (and not
+    # the same filesystem) when data_dir is a bind mount under a read-only rootfs.
+    staging_dir = data_dir / f".restore-staging-{uuid.uuid4().hex}"
+    staging_dir.mkdir(parents=True, exist_ok=True)
     switched = False
     try:
         total_bytes = 0
@@ -819,7 +857,11 @@ async def import_backup_archive(
         if auth_session is not None:
             auth_session.close()
 
-        restore_lock = FileLock(str(data_dir.parent / f".{data_dir.name}.restore.lock"))
+        # Restore lock lives in the temp dir, not data_dir.parent (read-only
+        # under a read-only rootfs) and not inside data_dir (the swap moves it).
+        restore_lock = FileLock(
+            str(Path(tempfile.gettempdir()) / f".{data_dir.name}.restore.lock")
+        )
         try:
             restore_lock.acquire(timeout=0)
             try:

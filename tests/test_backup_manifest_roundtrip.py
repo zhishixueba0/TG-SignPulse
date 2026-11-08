@@ -194,7 +194,8 @@ async def test_restore_health_failure_rolls_back_and_reopens_old_data(
     data = tmp_path / "data"
     data.mkdir()
     (data / "marker").write_text("old")
-    stage = tmp_path / "stage"
+    (data / ".app_secret_key").write_text("keep-me")
+    stage = data / ".restore-staging-test"
     stage.mkdir()
     (stage / "marker").write_text("new")
     started = []
@@ -206,8 +207,9 @@ async def test_restore_health_failure_rolls_back_and_reopens_old_data(
         marker = (data / "marker").read_text()
         started.append(marker)
         if marker == "new":
-            old = next(tmp_path.glob(".data.restore-old-*"))
+            old = next(data.glob(".restore-old-*"))
             assert (old / "marker").read_text() == "old"
+            assert (data / ".app_secret_key").read_text() == "keep-me"
             raise RuntimeError("health failed")
 
     monkeypatch.setattr(ops, "_stop_restore_services", stop)
@@ -215,6 +217,7 @@ async def test_restore_health_failure_rolls_back_and_reopens_old_data(
     with pytest.raises(RuntimeError, match="health failed"):
         await ops._activate_staged_restore(data, stage)
     assert (data / "marker").read_text() == "old"
+    assert (data / ".app_secret_key").read_text() == "keep-me"
     assert started == ["new", "old"]
     assert not ops.restore_in_progress()
 
@@ -228,7 +231,7 @@ async def test_restore_retains_maintenance_when_rollback_health_also_fails(
     data = tmp_path / "data"
     data.mkdir()
     (data / "marker").write_text("old")
-    stage = tmp_path / "stage"
+    stage = data / ".restore-staging-test"
     stage.mkdir()
     (stage / "marker").write_text("new")
 
