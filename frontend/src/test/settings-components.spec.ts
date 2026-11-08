@@ -159,7 +159,7 @@ describe('设置页拆分组件契约', () => {
     expect(guideBtn).toBeTruthy()
     await guideBtn?.trigger('click')
     expect(document.body.textContent).toContain('docker stop tg-signpulse')
-    expect(document.body.textContent).toContain('tar -xzf tg-signpulse-backup-*.tar.gz -C "<宿主机数据挂载目录，如 ./data>"')
+    expect(document.body.textContent).toContain('tar -xzf fork-pulse-backup-*.tar.gz -C "<宿主机数据挂载目录，如 ./data>"')
 
     // 切换到宿主机 Tab
     const hostTab = Array.from(document.body.querySelectorAll('button')).find((b) => b.textContent?.includes('宿主机'))
@@ -167,7 +167,7 @@ describe('设置页拆分组件契约', () => {
     hostTab?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
     await wrapper.vm.$nextTick()
     expect(document.body.textContent).toContain('pkill -f "backend.main"')
-    expect(document.body.textContent).toContain('tar -xzf tg-signpulse-backup-*.tar.gz -C "/opt/tg-data"')
+    expect(document.body.textContent).toContain('tar -xzf fork-pulse-backup-*.tar.gz -C "/opt/tg-data"')
   })
 
   it('DataManagementSettings 支持点击 WebDAV 快捷预设填充模版', async () => {

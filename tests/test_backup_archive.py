@@ -69,11 +69,11 @@ def test_prune_backups(tmp_path: Path):
     backup_dir = tmp_path / "backups"
     backup_dir.mkdir()
     for i in range(5):
-        (backup_dir / f"auto-2026010{i}-120000.tar.gz").write_text("test")
+        (backup_dir / f"fork-pulse-auto-2026010{i}-120000.tar.gz").write_text("test")
 
     removed = prune_backups(backup_dir, keep=2)
     assert removed == 3
-    remaining = list(backup_dir.glob("auto-*.tar.gz"))
+    remaining = list(backup_dir.glob("fork-pulse-auto-*.tar.gz"))
     assert len(remaining) == 2
 
 

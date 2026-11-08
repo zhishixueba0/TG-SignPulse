@@ -289,7 +289,7 @@ def prune_backups(backup_dir: Path, keep: int) -> int:
     files = sorted(
         [
             f
-            for f in backup_dir.glob("auto-*.*")
+            for f in backup_dir.glob("fork-pulse-auto-*.*")
             if f.name.endswith((".tar.gz", ".spbak"))
         ],
         key=_safe_mtime,
@@ -323,7 +323,7 @@ def run_auto_backup(
     # 备份文件名用 UTC，与历史记录/命中导出的时间口径一致，避免跨时区部署错位
     ts = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
     extension = "spbak" if encrypt else "tar.gz"
-    dest = backup_dir / f"auto-{ts}.{extension}"
+    dest = backup_dir / f"fork-pulse-auto-{ts}.{extension}"
     path_tuple = tuple(paths) if paths is not None else None
     try:
         if encrypt:

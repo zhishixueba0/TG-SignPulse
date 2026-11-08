@@ -126,7 +126,7 @@ export async function exportBackupArchive(
     const cd = res.headers.get("Content-Disposition") || "";
     const match = /filename="?([^"]+)"?/.exec(cd);
     const fallbackExt = options?.format === "spbak" ? "spbak" : "tar.gz";
-    const filename = match?.[1] || `tg-signpulse-backup-${Date.now()}.${fallbackExt}`;
+    const filename = match?.[1] || `fork-pulse-backup-${Date.now()}.${fallbackExt}`;
     downloadBlob(blob, filename);
     return { mode: "download", filename };
   } catch (e: unknown) {

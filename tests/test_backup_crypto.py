@@ -249,15 +249,15 @@ def test_prune_backups_with_spbak(tmp_path: Path):
     backup_dir = tmp_path / "backups"
     backup_dir.mkdir(parents=True, exist_ok=True)
     for i in range(3):
-        (backup_dir / f"auto-2026010{i}-120000.tar.gz").write_text("test")
+        (backup_dir / f"fork-pulse-auto-2026010{i}-120000.tar.gz").write_text("test")
     for i in range(3, 6):
-        (backup_dir / f"auto-2026010{i}-120000.spbak").write_text("test")
+        (backup_dir / f"fork-pulse-auto-2026010{i}-120000.spbak").write_text("test")
 
     removed = prune_backups(backup_dir, keep=2)
     assert removed == 4
     remaining = [
         f.name
-        for f in backup_dir.glob("auto-*.*")
+        for f in backup_dir.glob("fork-pulse-auto-*.*")
         if f.name.endswith((".tar.gz", ".spbak"))
     ]
     assert len(remaining) == 2

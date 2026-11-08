@@ -174,9 +174,9 @@ const applyWebdavPreset = (preset: WebdavPreset) => {
 const restoreCommand = computed(() => {
   const dataDir = props.backupStatus?.data_dir || '/app/data'
   if (restoreEnvTab.value === 'docker') {
-    return `# 1. 停止运行中的容器\ndocker stop tg-signpulse\n\n# 2. 将备份包解压覆盖至宿主机挂载目录（请将 <宿主机数据挂载目录> 替换为实际宿主机路径，例如 ./data）\ntar -xzf tg-signpulse-backup-*.tar.gz -C "<宿主机数据挂载目录，如 ./data>"\n\n# 3. 重新启动容器\ndocker start tg-signpulse`
+    return `# 1. 停止运行中的容器\ndocker stop tg-signpulse\n\n# 2. 将备份包解压覆盖至宿主机挂载目录（请将 <宿主机数据挂载目录> 替换为实际宿主机路径，例如 ./data）\ntar -xzf fork-pulse-backup-*.tar.gz -C "<宿主机数据挂载目录，如 ./data>"\n\n# 3. 重新启动容器\ndocker start tg-signpulse`
   }
-  return `# 1. 停止后台服务进程\npkill -f "backend.main"\n\n# 2. 解压覆盖到数据目录\ntar -xzf tg-signpulse-backup-*.tar.gz -C "${dataDir}"\n\n# 3. 重新拉起后台服务\nnohup python3 -m backend.main > run.log 2>&1 &`
+  return `# 1. 停止后台服务进程\npkill -f "backend.main"\n\n# 2. 解压覆盖到数据目录\ntar -xzf fork-pulse-backup-*.tar.gz -C "${dataDir}"\n\n# 3. 重新拉起后台服务\nnohup python3 -m backend.main > run.log 2>&1 &`
 })
 
 const copyRestoreCommand = async () => {

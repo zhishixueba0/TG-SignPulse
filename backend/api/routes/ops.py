@@ -641,8 +641,8 @@ async def export_backup_archive(
 
     ext = "spbak" if use_spbak else "tar.gz"
     ts = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
-    tmp_dir = Path(tempfile.mkdtemp(prefix="tg-signpulse-backup-"))
-    archive_path = tmp_dir / f"tg-signpulse-backup-{ts}.{ext}"
+    tmp_dir = Path(tempfile.mkdtemp(prefix="fork-pulse-backup-"))
+    archive_path = tmp_dir / f"fork-pulse-backup-{ts}.{ext}"
 
     tar_kwargs = {}
     if req_password:
