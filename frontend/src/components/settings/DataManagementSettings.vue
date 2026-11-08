@@ -29,6 +29,8 @@ const props = defineProps<{
   modelValue: SettingsFormState
   /** 服务端是否已保存 WebDAV 密码 */
   webdavPasswordSet?: boolean
+  /** 服务端是否已保存自动备份自定义密码 */
+  autoBackupPasswordSet?: boolean
   /** 备份状态 */
   backupStatus: BackupStatus | null
   /** 远端 WebDAV 文件列表 */
@@ -561,6 +563,35 @@ const copyRestoreCommand = async () => {
               :disabled="!modelValue.autoBackupEnabled"
             />
             <p class="text-[10px] text-[var(--sp-text-muted)]">{{ t('settings.autoBackupKeepHint') }}</p>
+          </div>
+        </div>
+
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2">
+          <div class="space-y-1">
+            <label class="text-xs text-[var(--sp-text-secondary)] dark:text-[var(--sp-text-secondary)]">{{ t('settings.autoBackupFormatLabel') }}</label>
+            <select
+              :value="modelValue.autoBackupFormat"
+              @change="update('autoBackupFormat', ($event.target as HTMLSelectElement).value as 'auto' | 'tar.gz' | 'spbak')"
+              class="ui-input"
+              :disabled="!modelValue.autoBackupEnabled"
+            >
+              <option value="auto">{{ t('settings.autoBackupFormatAuto') }}</option>
+              <option value="tar.gz">{{ t('settings.autoBackupFormatTarGz') }}</option>
+              <option value="spbak">{{ t('settings.autoBackupFormatSpbak') }}</option>
+            </select>
+            <p class="text-[10px] text-[var(--sp-text-muted)]">{{ t('settings.autoBackupFormatHint') }}</p>
+          </div>
+          <div v-if="modelValue.autoBackupFormat === 'spbak'" class="space-y-1">
+            <label class="text-xs text-[var(--sp-text-secondary)] dark:text-[var(--sp-text-secondary)]">{{ t('settings.autoBackupPasswordLabel') }}</label>
+            <input
+              :value="modelValue.autoBackupPassword"
+              @input="update('autoBackupPassword', ($event.target as HTMLInputElement).value)"
+              type="password"
+              :placeholder="autoBackupPasswordSet ? t('settings.autoBackupPasswordSavedHint') : t('settings.autoBackupPasswordHint')"
+              class="ui-input"
+              :disabled="!modelValue.autoBackupEnabled"
+            />
+            <p class="text-[10px] text-[var(--sp-text-muted)]">{{ t('settings.autoBackupPasswordDesc') }}</p>
           </div>
         </div>
 

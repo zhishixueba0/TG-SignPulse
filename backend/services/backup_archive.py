@@ -305,6 +305,22 @@ def prune_backups(backup_dir: Path, keep: int) -> int:
     return removed
 
 
+def auto_backup_format(settings: Optional[dict]) -> str:
+    """自动备份格式：'auto'（密钥加密）| 'tar.gz'（不加密）| 'spbak'（自定义密码或密钥加密），默认 'auto'。"""
+    if not isinstance(settings, dict):
+        return "auto"
+    raw = str(settings.get("auto_backup_format") or "auto").strip().lower()
+    return raw if raw in {"auto", "tar.gz", "spbak"} else "auto"
+
+
+def auto_backup_password(settings: Optional[dict]) -> Optional[str]:
+    """自动备份自定义密码（仅 format='spbak' 时使用）；空则回落密钥加密。"""
+    if not isinstance(settings, dict):
+        return None
+    raw = settings.get("auto_backup_password")
+    return str(raw) if raw is not None and str(raw).strip() != "" else None
+
+
 def run_auto_backup(
     data_dir: Path,
     *,
@@ -313,6 +329,7 @@ def run_auto_backup(
     webdav_settings: Optional[dict] = None,
     backup_target: str = "auto",
     encrypt: bool = False,
+    password: Optional[str] = None,
 ) -> dict:
     """执行一次自动备份；远端（WebDAV）上传成功后删除本地副本以节省磁盘。
 
@@ -327,7 +344,9 @@ def run_auto_backup(
     path_tuple = tuple(paths) if paths is not None else None
     try:
         if encrypt:
-            create_backup_tarball(data_dir, dest, path_tuple, encrypt=True)
+            create_backup_tarball(
+                data_dir, dest, path_tuple, encrypt=True, password=password
+            )
         else:
             create_backup_tarball(data_dir, dest, path_tuple)
     except ValueError as exc:

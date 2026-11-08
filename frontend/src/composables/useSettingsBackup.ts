@@ -45,6 +45,7 @@ export function useSettingsBackup(options: {
   const remoteWebdavFiles = ref<RemoteBackupFile[]>([])
   const remoteWebdavMessage = ref('')
   const webdavPasswordSet = ref(false)
+  const autoBackupPasswordSet = ref(false)
   const remoteDownloadName = ref('')
 
   const validateWebdavForm = (): boolean => {
@@ -67,6 +68,10 @@ export function useSettingsBackup(options: {
     if (options.settings.value.webdavPassword) {
       webdavPasswordSet.value = true
       options.settings.value.webdavPassword = ''
+    }
+    if (options.settings.value.autoBackupPassword) {
+      autoBackupPasswordSet.value = true
+      options.settings.value.autoBackupPassword = ''
     }
   }
 
@@ -284,6 +289,7 @@ export function useSettingsBackup(options: {
     remoteWebdavFiles,
     remoteWebdavMessage,
     webdavPasswordSet,
+    autoBackupPasswordSet,
     remoteDownloadName,
     afterWebdavSettingsSaved,
     handleExport,

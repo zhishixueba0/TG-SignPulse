@@ -185,6 +185,27 @@ def normalize_global_settings(settings: Dict[str, Any]) -> Dict[str, Any]:
         else:
             normalized["webdav_password"] = str(pwd)
 
+    # 自动备份格式：仅接受 auto / tar.gz / spbak，非法值忽略保留旧值
+    if "auto_backup_format" in normalized:
+        raw_fmt = normalized["auto_backup_format"]
+        if raw_fmt is None or str(raw_fmt).strip() == "":
+            normalized["auto_backup_format"] = "auto"
+        else:
+            value = str(raw_fmt).strip().lower()
+            if value in {"auto", "tar.gz", "spbak"}:
+                normalized["auto_backup_format"] = value
+            else:
+                _logger.debug("忽略非法 auto_backup_format=%r", raw_fmt)
+                normalized.pop("auto_backup_format")
+
+    # 自动备份自定义密码：空串不修改；保留原值（不去空白，避免改动密码本身）
+    if "auto_backup_password" in normalized:
+        pwd = normalized["auto_backup_password"]
+        if pwd is None or str(pwd).strip() == "":
+            normalized.pop("auto_backup_password")
+        else:
+            normalized["auto_backup_password"] = str(pwd)
+
     if "execution_engine" in normalized:
         raw_eng = normalized["execution_engine"]
         if raw_eng is None or str(raw_eng).strip() == "":

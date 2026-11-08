@@ -44,6 +44,7 @@ const {
   remoteWebdavFiles,
   remoteWebdavMessage,
   webdavPasswordSet,
+  autoBackupPasswordSet,
   botTokenSet,
   proxySet,
   remoteDownloadName,
@@ -132,6 +133,7 @@ const {
           <DataManagementSettings
             v-model="settings"
             :webdav-password-set="webdavPasswordSet"
+            :auto-backup-password-set="autoBackupPasswordSet"
             :backup-status="backupStatus"
             :remote-files="remoteWebdavFiles"
             :remote-message="remoteWebdavMessage"

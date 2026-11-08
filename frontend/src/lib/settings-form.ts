@@ -37,6 +37,8 @@ export type SettingsFormState = {
   autoBackupEnabled: boolean
   autoBackupInterval: number | ''
   autoBackupKeep: number | ''
+  autoBackupFormat: 'auto' | 'tar.gz' | 'spbak'
+  autoBackupPassword: string
   webdavUrl: string
   webdavUsername: string
   webdavPassword: string
@@ -151,6 +153,11 @@ export function buildBackupPayload(s: SettingsFormState) {
     auto_backup_enabled: s.autoBackupEnabled,
     auto_backup_interval_hours: clampNumber(s.autoBackupInterval, 1, 168) ?? 24,
     auto_backup_keep: clampNumber(s.autoBackupKeep, 1, 30) ?? 3,
+    auto_backup_format: s.autoBackupFormat || 'auto',
+    // 空密码表示不覆盖服务端已有值
+    ...(s.autoBackupPassword
+      ? { auto_backup_password: s.autoBackupPassword }
+      : {}),
     webdav_url: s.webdavUrl || null,
     webdav_username: s.webdavUsername || null,
     // 空密码表示不覆盖服务端已有值
@@ -321,6 +328,8 @@ export function applyGlobalSettingsToForm(
     auto_backup_enabled?: boolean
     auto_backup_interval_hours?: number | null
     auto_backup_keep?: number | null
+    auto_backup_format?: string | null
+    auto_backup_password_set?: boolean
     webdav_url?: string | null
     webdav_username?: string | null
     webdav_password_set?: boolean
@@ -333,6 +342,7 @@ export function applyGlobalSettingsToForm(
 ): {
     botTokenSet: boolean
     webdavPasswordSet: boolean
+    autoBackupPasswordSet: boolean
     proxySet: boolean
   } {
   s.checkInterval = res.sign_interval ? String(res.sign_interval) : ''
@@ -365,6 +375,10 @@ export function applyGlobalSettingsToForm(
   s.autoBackupEnabled = res.auto_backup_enabled || false
   s.autoBackupInterval = res.auto_backup_interval_hours || 24
   s.autoBackupKeep = res.auto_backup_keep || 3
+  const abf = res.auto_backup_format
+  s.autoBackupFormat =
+    abf === 'tar.gz' || abf === 'spbak' ? abf : 'auto'
+  s.autoBackupPassword = ''
   s.webdavUrl = res.webdav_url || ''
   s.webdavUsername = res.webdav_username || ''
   s.webdavPassword = ''
@@ -376,6 +390,7 @@ export function applyGlobalSettingsToForm(
   return {
     botTokenSet: !!res.telegram_bot_token_set,
     webdavPasswordSet: !!res.webdav_password_set,
+    autoBackupPasswordSet: !!res.auto_backup_password_set,
     proxySet: !!res.global_proxy_set,
   }
 }

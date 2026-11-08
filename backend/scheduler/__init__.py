@@ -432,7 +432,9 @@ async def _job_auto_backup() -> None:
     try:
         from backend.core.config import get_settings
         from backend.services.backup_archive import (
+            auto_backup_format,
             auto_backup_keep,
+            auto_backup_password,
             run_auto_backup,
             should_run_auto_backup,
         )
@@ -445,6 +447,9 @@ async def _job_auto_backup() -> None:
         if not should_run_auto_backup(cfg):
             return
         data_dir = Path(get_settings().resolve_base_dir())
+        # 自动备份格式按设置走：'tar.gz' 不加密，'auto' 密钥加密，
+        # 'spbak' 用自定义密码（未设则回落密钥加密）
+        fmt = auto_backup_format(cfg)
         # 打包 + 远端上传均为同步阻塞操作，放入线程池避免冻结事件循环
         # （数据目录大时打包可能耗时数十秒，阻塞期间 API/SSE/调度全部停摆）
         result = await asyncio.to_thread(
@@ -453,7 +458,8 @@ async def _job_auto_backup() -> None:
             keep=auto_backup_keep(cfg),
             webdav_settings=cfg,
             backup_target=str(cfg.get("backup_target") or "auto"),
-            encrypt=True,
+            encrypt=fmt != "tar.gz",
+            password=auto_backup_password(cfg) if fmt == "spbak" else None,
         )
         wd = result.get("webdav") or {}
         logger.info(

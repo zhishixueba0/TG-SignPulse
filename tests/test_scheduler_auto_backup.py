@@ -84,3 +84,42 @@ class TestAutoBackupJob:
         with patch("backend.services.backup_archive.run_auto_backup") as run_m:
             asyncio.run(_job_auto_backup())
         run_m.assert_not_called()
+
+
+class TestAutoBackupFormat:
+    def test_spbak_format_uses_custom_password(self, isolated_env: Path):
+        from backend.services.config import get_config_service
+
+        get_config_service().save_global_settings(
+            dict(
+                WEBDAV_CFG,
+                auto_backup_format="spbak",
+                auto_backup_password="my-pw",
+            )
+        )
+        run_m = _drive({"success": True, "webdav": {"success": True}})
+        kwargs = run_m.call_args.kwargs
+        assert kwargs["encrypt"] is True
+        assert kwargs["password"] == "my-pw"
+
+    def test_tar_gz_format_is_unencrypted(self, isolated_env: Path):
+        from backend.services.config import get_config_service
+
+        get_config_service().save_global_settings(
+            dict(WEBDAV_CFG, auto_backup_format="tar.gz")
+        )
+        run_m = _drive({"success": True, "webdav": {"success": True}})
+        kwargs = run_m.call_args.kwargs
+        assert kwargs["encrypt"] is False
+        assert kwargs["password"] is None
+
+    def test_auto_format_uses_secret_key(self, isolated_env: Path):
+        from backend.services.config import get_config_service
+
+        get_config_service().save_global_settings(
+            dict(WEBDAV_CFG, auto_backup_format="auto")
+        )
+        run_m = _drive({"success": True, "webdav": {"success": True}})
+        kwargs = run_m.call_args.kwargs
+        assert kwargs["encrypt"] is True
+        assert kwargs["password"] is None

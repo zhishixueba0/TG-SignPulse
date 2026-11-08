@@ -71,6 +71,8 @@ function baseSettings(over: Partial<SettingsFormState> = {}): SettingsFormState 
     autoBackupEnabled: false,
     autoBackupInterval: 24,
     autoBackupKeep: 3,
+    autoBackupFormat: 'auto',
+    autoBackupPassword: '',
     webdavUrl: 'https://dav.example.com',
     webdavUsername: 'user',
     webdavPassword: 'pass',

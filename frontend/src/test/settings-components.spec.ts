@@ -35,6 +35,8 @@ const settingsState = (): SettingsFormState => ({
   autoBackupEnabled: false,
   autoBackupInterval: 24,
   autoBackupKeep: 3,
+  autoBackupFormat: 'auto',
+  autoBackupPassword: '',
   webdavUrl: '',
   webdavUsername: '',
   webdavPassword: '',
@@ -250,6 +252,42 @@ describe('设置页拆分组件契约', () => {
     expect(wrapper.emitted('archive-import')?.[1]?.[0]).toMatchObject({
       password: 'export-pw',
     })
+  })
+
+  it('DataManagementSettings 自动备份格式可选，选自定义密码加密时显示密码框', async () => {
+    const mountWithFormat = (format: 'auto' | 'tar.gz' | 'spbak') =>
+      mount(DataManagementSettings, {
+        props: {
+          modelValue: {
+            ...settingsState(),
+            autoBackupEnabled: true,
+            autoBackupFormat: format,
+          },
+          backupStatus: null,
+          remoteFiles: [],
+          remoteMessage: '',
+          remoteDownloadName: '',
+        },
+        global: { plugins: [i18n] },
+      })
+
+    // 默认自动（密钥加密），不显示自定义密码框
+    const autoWrapper = mountWithFormat('auto')
+    expect(autoWrapper.text()).not.toContain('自动备份自定义密码')
+
+    // 选自定义密码加密，密码框出现；切格式会发出 update:modelValue
+    const selects = autoWrapper.findAll('select')
+    const autoFormatSelect = selects.find((s) =>
+      s.element.parentElement?.textContent?.includes('自动备份格式'),
+    )
+    expect(autoFormatSelect?.exists()).toBe(true)
+    await autoFormatSelect?.setValue('spbak')
+    expect(autoWrapper.emitted('update:modelValue')?.at(-1)?.[0]).toMatchObject({
+      autoBackupFormat: 'spbak',
+    })
+
+    const spbakWrapper = mountWithFormat('spbak')
+    expect(spbakWrapper.text()).toContain('自动备份自定义密码')
   })
 
   it('AboutSettings 展示灰度分流引擎来源', () => {

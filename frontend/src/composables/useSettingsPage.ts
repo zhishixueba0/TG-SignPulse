@@ -73,6 +73,8 @@ export function useSettingsPage() {
     autoBackupEnabled: false,
     autoBackupInterval: 24,
     autoBackupKeep: 3,
+    autoBackupFormat: 'auto',
+    autoBackupPassword: '',
     webdavUrl: '',
     webdavUsername: '',
     webdavPassword: '',
@@ -229,6 +231,7 @@ export function useSettingsPage() {
     remoteWebdavFiles,
     remoteWebdavMessage,
     webdavPasswordSet,
+    autoBackupPasswordSet,
     remoteDownloadName,
     afterWebdavSettingsSaved,
     handleExport,
@@ -297,6 +300,7 @@ export function useSettingsPage() {
       const flags = applyGlobalSettingsToForm(settings.value, res)
       botTokenSet.value = flags.botTokenSet
       webdavPasswordSet.value = flags.webdavPasswordSet
+      autoBackupPasswordSet.value = flags.autoBackupPasswordSet
       proxySet.value = flags.proxySet
       // 同步面板展示时区：Settings 加载后，Dashboard/Logs 等页的时间格式跟随
       setPanelTimezone(res.timezone)
@@ -417,6 +421,7 @@ export function useSettingsPage() {
     remoteWebdavFiles,
     remoteWebdavMessage,
     webdavPasswordSet,
+    autoBackupPasswordSet,
     botTokenSet,
     proxySet,
     remoteDownloadName,

@@ -451,6 +451,8 @@ class GlobalSettingsRequest(BaseModel):
     auto_backup_enabled: Optional[bool] = None
     auto_backup_interval_hours: Optional[int] = None
     auto_backup_keep: Optional[int] = None
+    auto_backup_format: Optional[str] = None
+    auto_backup_password: Optional[str] = None
     webdav_url: Optional[str] = None
     webdav_username: Optional[str] = None
     webdav_password: Optional[str] = None
@@ -508,6 +510,10 @@ class GlobalSettingsResponse(BaseModel):
     auto_backup_enabled: bool = False
     auto_backup_interval_hours: Optional[int] = 24
     auto_backup_keep: Optional[int] = 3
+    auto_backup_format: str = "auto"
+    # GET 永不回传明文密码；用 auto_backup_password_set 表示已落盘
+    auto_backup_password: Optional[str] = None
+    auto_backup_password_set: bool = False
     webdav_url: Optional[str] = None
     webdav_username: Optional[str] = None
     # GET 永不回传明文密码；用 webdav_password_set 表示已落盘
@@ -548,6 +554,11 @@ def get_global_settings(current_user: User = Depends(get_current_user)):
             raw_pwd is not None and str(raw_pwd).strip() != ""
         )
         settings["webdav_password"] = None
+        raw_auto_pwd = settings.get("auto_backup_password")
+        settings["auto_backup_password_set"] = bool(
+            raw_auto_pwd is not None and str(raw_auto_pwd).strip() != ""
+        )
+        settings["auto_backup_password"] = None
         raw_token = settings.get("telegram_bot_token")
         settings["telegram_bot_token_set"] = bool(
             raw_token is not None and str(raw_token).strip() != ""
