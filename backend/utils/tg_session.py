@@ -236,6 +236,9 @@ def set_account_session_string(account_name: str, session_string: str) -> None:
     entry["updated_at"] = utc_now_iso()
     accounts[account_name] = entry
     _save_account_store(data)
+    # 新建条目：首次落盘即自动分配设备指纹（排重）；老号不动。
+    if not legacy_entry:
+        auto_assign_device_profile(account_name)
 
 
 def delete_account_session_string(account_name: str) -> None:
@@ -336,6 +339,54 @@ def _next_sort_order(accounts: dict[str, Any]) -> int:
     return (max(orders) + 1) if orders else 0
 
 
+def auto_assign_device_profile(account_name: str) -> Optional[dict[str, str]]:
+    """新号首次落盘时自动分配一条未被占用的设备指纹（best-effort，永不抛错）。
+
+    只在账号没有 device_profile 时分配；已有指纹的不覆盖；池子耗尽
+    （89 条全被占用）时返回 None 并记 warning，不悄悄撞车、不阻断登录。
+    调用方只在新建条目时触发，已有条目的账号（含未设指纹的老号）不会走到这里。
+    """
+    try:
+        from backend.services.telegram.device_profiles import (
+            pick_unused_random_profile,
+            profile_key,
+            validate_device_profile,
+        )
+
+        data = _load_account_store()
+        accounts = data.get("accounts", {})
+        entry = accounts.get(account_name)
+        if isinstance(entry, dict):
+            existing = entry.get("device_profile")
+            if isinstance(existing, dict) and existing.get("device_model"):
+                return None
+        used: set[tuple[str, ...]] = set()
+        for other in accounts.values():
+            if not isinstance(other, dict):
+                continue
+            other_profile = other.get("device_profile")
+            if isinstance(other_profile, dict) and other_profile.get("device_model"):
+                used.add(profile_key(other_profile))
+        picked = pick_unused_random_profile(used)
+        if picked is None:
+            _logger.warning("设备指纹池已耗尽，账号 %s 未自动分配指纹", account_name)
+            return None
+        validated = validate_device_profile(picked)
+        set_account_profile(account_name, device_profile=validated)
+        _logger.info(
+            "账号 %s 自动分配设备指纹：%s / %s",
+            account_name,
+            validated.get("device_model"),
+            validated.get("system_version"),
+        )
+        return validated
+    except Exception:
+        _logger.warning(
+            "账号 %s 自动分配设备指纹失败（不影响登录）", account_name, exc_info=True
+        )
+        return None
+
+
 def set_account_profile(
     account_name: str,
     *,
@@ -359,6 +410,7 @@ def set_account_profile(
     data = _load_account_store()
     accounts = data["accounts"]
     entry = accounts.get(account_name)
+    is_new = not isinstance(entry, dict)
     if not isinstance(entry, dict):
         entry = {}
     _stamp_created_at(entry)
@@ -410,6 +462,9 @@ def set_account_profile(
     entry["updated_at"] = utc_now_iso()
     accounts[account_name] = entry
     _save_account_store(data)
+    # 新建条目且本次未显式传指纹：首次落盘即自动分配（排重）；老号不动。
+    if is_new and device_profile is None:
+        auto_assign_device_profile(account_name)
 
 
 def set_account_identity(
