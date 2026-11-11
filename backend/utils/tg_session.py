@@ -343,7 +343,7 @@ def auto_assign_device_profile(account_name: str) -> Optional[dict[str, str]]:
     """新号首次落盘时自动分配一条未被占用的设备指纹（best-effort，永不抛错）。
 
     只在账号没有 device_profile 时分配；已有指纹的不覆盖；池子耗尽
-    （89 条全被占用）时返回 None 并记 warning，不悄悄撞车、不阻断登录。
+    （203 条全被占用）时返回 None 并记 warning，不悄悄撞车、不阻断登录。
     调用方只在新建条目时触发，已有条目的账号（含未设指纹的老号）不会走到这里。
     """
     try:
