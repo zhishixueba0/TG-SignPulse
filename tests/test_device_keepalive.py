@@ -84,6 +84,64 @@ class TestEnabledGate:
         assert "运行中" in result["message"]
 
 
+class TestAccountSpacing:
+    @pytest.mark.asyncio()
+    async def test_delay_between_checked_accounts(self, keepalive, monkeypatch):
+        keepalive.tg.list_accounts.return_value = [
+            {"name": "acc1"},
+            {"name": "acc2"},
+            {"name": "acc3"},
+        ]
+        delays: list[float] = []
+
+        async def capture(delay: float) -> None:
+            delays.append(delay)
+
+        monkeypatch.setattr(keepalive.svc, "_sleep_between_accounts", capture)
+        result = await keepalive.svc.run_due()
+        assert result["kept_alive"] == 3
+        # 3 个号之间隔两次，第一个号前面不隔
+        assert len(delays) == 2
+        assert all(30.0 <= d <= 120.0 for d in delays)
+
+    @pytest.mark.asyncio()
+    async def test_force_uses_short_delay(self, keepalive, monkeypatch):
+        keepalive.tg.list_accounts.return_value = [
+            {"name": "acc1"},
+            {"name": "acc2"},
+        ]
+        delays: list[float] = []
+
+        async def capture(delay: float) -> None:
+            delays.append(delay)
+
+        monkeypatch.setattr(keepalive.svc, "_sleep_between_accounts", capture)
+        result = await keepalive.svc.run_due(force=True)
+        assert result["kept_alive"] == 2
+        assert len(delays) == 1
+        assert all(3.0 <= d <= 10.0 for d in delays)
+
+    @pytest.mark.asyncio()
+    async def test_skipped_accounts_do_not_trigger_delay(self, keepalive, monkeypatch):
+        keepalive.tg.list_accounts.return_value = [{"name": "acc1"}]
+        await keepalive.svc.run_due()  # acc1 成功，记下 last_ok_at
+        keepalive.tg.list_accounts.return_value = [
+            {"name": "acc1"},
+            {"name": "acc2"},
+        ]
+        delays: list[float] = []
+
+        async def capture(delay: float) -> None:
+            delays.append(delay)
+
+        monkeypatch.setattr(keepalive.svc, "_sleep_between_accounts", capture)
+        result = await keepalive.svc.run_due()
+        assert result["skipped"] == 1
+        assert result["kept_alive"] == 1
+        # 只有一个号实际被查，不需要间隔
+        assert delays == []
+
+
 class TestRunBehavior:
     @pytest.mark.asyncio()
     async def test_ok_result_persisted_and_skipped_next_run(self, keepalive):

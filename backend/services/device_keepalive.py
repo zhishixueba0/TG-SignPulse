@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import random
 import threading
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List
@@ -15,6 +16,12 @@ from backend.utils.time import utc_now, utc_now_iso_z
 from tg_signer.utils import extract_flood_wait_seconds
 
 logger = logging.getLogger("backend.device_keepalive")
+
+# 号间随机间隔：避免一批账号在同一轮保活里被连续唤醒。
+# 定时跑 (force=False) 是后台任务，用长间隔拉开节奏；
+# 手动“立即保活” (force=True) 是前端直接等结果的接口，用短间隔，避免等太久。
+SCHEDULED_ACCOUNT_DELAY_RANGE = (30.0, 120.0)
+FORCED_ACCOUNT_DELAY_RANGE = (3.0, 10.0)
 
 
 class DeviceKeepaliveService:
@@ -62,6 +69,11 @@ class DeviceKeepaliveService:
             return parsed.astimezone(timezone.utc)
         except ValueError:
             return None
+
+    @staticmethod
+    async def _sleep_between_accounts(delay: float) -> None:
+        """号间等待：单独成方法，方便测试替换，不必真的睡。"""
+        await asyncio.sleep(delay)
 
     def get_status(self) -> Dict[str, Any]:
         config_service = get_config_service()
@@ -185,6 +197,7 @@ class DeviceKeepaliveService:
         results: List[Dict[str, Any]] = []
         kept_alive = skipped = failed = 0
         flood_mgr = get_flood_backoff_manager()
+        checked_any = False
 
         for item in accounts:
             account_name = str(item.get("name") or "").strip()
@@ -220,6 +233,19 @@ class DeviceKeepaliveService:
                     }
                 )
                 continue
+
+            # 号间间隔：只隔实际要查的号，跳过的号（未到期 / FloodWait 避让）
+            # 不发请求，不用等；第一个要查的号前面也不用等。
+            if checked_any:
+                delay_range = (
+                    FORCED_ACCOUNT_DELAY_RANGE
+                    if force
+                    else SCHEDULED_ACCOUNT_DELAY_RANGE
+                )
+                delay = random.uniform(*delay_range)
+                logger.info("设备保活号间间隔 %s: 等待 %.1fs", account_name, delay)
+                await self._sleep_between_accounts(delay)
+            checked_any = True
 
             try:
                 status = await service.check_account_status(
