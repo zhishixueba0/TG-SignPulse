@@ -1330,6 +1330,29 @@ async def update_account(
                     status_code=status.HTTP_409_CONFLICT,
                     detail="账号正忙（正在执行操作），请稍后再试",
                 )
+            # 绑定前探活拦截：绑定变更为 pool/custom 时，先真实握手探活，
+            # 不通就拒绝绑定（避免死代理落盘）。direct/inherit 不用探。
+            if changed and target_mode in ("pool", "custom"):
+                from backend.services.telegram.proxy_store import (
+                    ensure_proxy_dict_usable,
+                    proxy_dict_for_row,
+                )
+                from backend.utils.proxy import build_proxy_dict
+
+                probe_dict = None
+                if target_mode == "pool":
+                    probe_row = get_proxy_row(str(target_proxy_id))
+                    probe_dict = (
+                        proxy_dict_for_row(probe_row) if probe_row is not None else None
+                    )
+                else:
+                    probe_dict = build_proxy_dict((request.proxy or "").strip())
+                try:
+                    await ensure_proxy_dict_usable(probe_dict, label="所选代理")
+                except ValueError as e:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)
+                    ) from e
             proxy_mode_to_save = target_mode
             proxy_id_to_save = target_proxy_id
 

@@ -427,6 +427,14 @@ async def passkey_login(
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    # 绑定前探活拦截：与短信/扫码/导入入口的 verify_account_proxy 门禁一致，
+    # 死代理在建客户端之前就拦住，不落盘。
+    try:
+        from backend.services.telegram.proxy_store import ensure_proxy_dict_usable
+
+        await ensure_proxy_dict_usable(selection.proxy_dict, label="所选代理")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     proxy_kwargs = _telethon_proxy_kwargs(selection.proxy_url)
     _prune_pending()
 

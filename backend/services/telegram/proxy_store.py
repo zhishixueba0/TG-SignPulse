@@ -687,6 +687,28 @@ def is_account_online(account_name: str) -> bool:
     return False
 
 
+async def ensure_proxy_dict_usable(
+    proxy_dict: Optional[dict], *, label: str = "代理"
+) -> None:
+    """绑定前探活拦截：对要绑定的代理做一次真实握手探活。
+
+    proxy_dict 为 None（直连）直接放行。pool/custom 走
+    probe_proxy_exit（force=True 强制 fresh 探测，manual=True 不计
+    熔断），握手不通过就抛 ValueError，调用方拒绝绑定。
+    只做探测，不写库、不改绑定。
+    """
+    if not proxy_dict:
+        return
+    from backend.utils.proxy import probe_proxy_exit
+
+    outcome = await probe_proxy_exit(proxy_dict, force=True, manual=True)
+    if outcome.status.name != "OK":
+        raise ValueError(
+            f"PROXY_PROBE_BLOCKED: {label}探活失败"
+            f"（{outcome.code}：{outcome.detail}），请换一个代理或改直连"
+        )
+
+
 def set_account_proxy_binding(
     account_name: str,
     mode: str,

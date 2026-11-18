@@ -271,3 +271,38 @@ async def test_sync_skips_invalid_mtproto_secret(memory_session_local, monkeypat
     assert job["added"] == 2
     rows = proxy_store.list_proxy_rows()
     assert {r.host for r in rows} == {"127.0.0.1", "5.6.7.8"}
+
+
+@pytest.mark.asyncio
+async def test_ensure_proxy_dict_usable_blocks_dead_proxy(monkeypatch):
+    """绑定前探活拦截：死代理拒绑、活代理放行、直连（None）直接放行。"""
+
+    async def fake_probe_dead(*args, **kwargs):
+        from backend.utils.proxy import ProxyProbeOutcome, ProxyProbeStatus
+
+        return ProxyProbeOutcome(
+            status=ProxyProbeStatus.UNAVAILABLE,
+            detail="endpoint unreachable",
+            code="PROXY_PROBE_UNAVAILABLE",
+        )
+
+    async def fake_probe_ok(*args, **kwargs):
+        from backend.utils.proxy import ProxyProbeOutcome, ProxyProbeStatus
+
+        return ProxyProbeOutcome(status=ProxyProbeStatus.OK, detail="ok", code="OK")
+
+    # 直连（None）不探活，直接放行
+    await proxy_store.ensure_proxy_dict_usable(None)
+
+    # 探活失败 → 抛 PROXY_PROBE_BLOCKED
+    monkeypatch.setattr("backend.utils.proxy.probe_proxy_exit", fake_probe_dead)
+    with pytest.raises(ValueError, match="PROXY_PROBE_BLOCKED"):
+        await proxy_store.ensure_proxy_dict_usable(
+            {"type": "mtproto", "hostname": "1.2.3.4", "port": 443, "secret": "aa" * 16}
+        )
+
+    # 探活通过 → 放行
+    monkeypatch.setattr("backend.utils.proxy.probe_proxy_exit", fake_probe_ok)
+    await proxy_store.ensure_proxy_dict_usable(
+        {"type": "mtproto", "hostname": "1.2.3.4", "port": 443, "secret": "aa" * 16}
+    )
