@@ -512,7 +512,9 @@ def get_account_session_identity(account_name: str) -> Optional[dict]:
     if not session_file.is_file():
         return None
     try:
-        conn = sqlite3.connect(f"file:{session_file}?mode=ro", uri=True, timeout=5)
+        # 快速失败：session 被锁时最多等 2 秒就跳过，别让单个坏号拖住列表。
+        # （2026-11-20 卡死教训：5 秒 × 逐个读，坏号能拖垮整个列表。）
+        conn = sqlite3.connect(f"file:{session_file}?mode=ro", uri=True, timeout=2)
     except Exception:
         return None
     try:

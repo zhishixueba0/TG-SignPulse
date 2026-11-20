@@ -85,3 +85,36 @@ async def test_invalidate_cached_client():
 
     assert lock2 is not lock1
     assert lock_mem2 is not lock_mem1
+
+
+@pytest.mark.asyncio
+async def test_client_start_database_locked_fails_fast(tmp_path):
+    """客户端启动撞上 session 写锁时快速失败：最多尝试 2 次就报错。
+
+    回归 2026-11-20 卡死：旧值 5 次重试、等待 2/5/8/11 秒，撞锁后占着
+    账号锁重试近 40 秒，拖垮线程池。快速失败只留一次重试给瞬态锁。
+    """
+    from unittest.mock import AsyncMock, patch
+
+    from tg_signer.core.client import Client
+
+    client = Client(
+        "test_failfast",
+        api_id=12345,
+        api_hash="abc123",
+        workdir=str(tmp_path),
+        in_memory=False,
+    )
+    calls = {"n": 0}
+
+    async def fake_connect():
+        calls["n"] += 1
+        raise Exception("database is locked")
+
+    client.connect = fake_connect
+    with patch("asyncio.sleep", new=AsyncMock()):
+        with pytest.raises(Exception, match="database is locked"):
+            await client.__aenter__()
+    assert calls["n"] == 2
+    assert _CLIENT_REFS.get(client.key, 0) == 0
+    assert client.key not in _CLIENT_INSTANCES

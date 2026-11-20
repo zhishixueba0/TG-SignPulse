@@ -11,8 +11,6 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 
-import pytest
-
 from backend.utils.tg_session import get_account_session_identity
 
 

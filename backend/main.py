@@ -294,12 +294,12 @@ def health_check() -> dict[str, str]:
 
 
 @app.get("/healthz")
-def health_checkz() -> dict[str, str]:
+async def health_checkz() -> dict[str, str]:
     return {"status": "ok"}
 
 
 @app.get("/readyz")
-def ready_check(response: Response) -> dict:
+async def ready_check(response: Response) -> dict:
     """就绪探针：未完成启动时 503；就绪时附带调度锁与旧 API 写策略（便于运维自查）。"""
     if not getattr(app.state, "ready", False):
         response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE

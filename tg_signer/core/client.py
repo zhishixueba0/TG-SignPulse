@@ -559,8 +559,14 @@ class Client(BaseClient):
                         "No session_string available for in-memory mode: expected "
                         f"{self.session_string_file} or an explicit session_string"
                     )
-                # Retry loop for database locks
-                max_retries = 5
+                # Retry loop for database locks.
+                # Fail fast on purpose: a stuck session lock must surface as an
+                # error for this one operation, not hold the account lock while
+                # retrying for ~40s and drag the whole panel down (2026-11-20
+                # freeze). Transient locks clear within a second or two; a
+                # lock that survives 2 attempts is stuck, retrying longer
+                # only blocks threads.
+                max_retries = 2
                 connected_ok = False
                 try:
                     for attempt in range(max_retries):
@@ -619,9 +625,10 @@ class Client(BaseClient):
                                     pass
 
                                 # SQLite 锁等待用线性退避 + 随机抖动（连接启动场景，与瞬态网络
-                                # 错误的指数退避 compute_backoff 刻意区分，抖动避免并发惊群）
+                                # 错误的指数退避 compute_backoff 刻意区分，抖动避免并发惊群）。
+                                # 快速失败：只给瞬态锁留 ~1 秒，多了就是卡死的锁，重试无益。
                                 jitter = random.uniform(0.1, 0.9)
-                                wait_time = round(2 + (attempt * 3) + jitter, 2)
+                                wait_time = round(1 + (attempt * 1) + jitter, 2)
                                 logger.warning(
                                     "Database locked when starting client %s, retrying in %ss... (%s/%s)",
                                     self.name,
