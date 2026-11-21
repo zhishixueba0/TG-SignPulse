@@ -763,13 +763,17 @@ class TelegramAccountsMixin:
             }
 
         try:
-            # Reuse shared clients and avoid context-manager disconnect on each refresh.
+            # 统一走 async with 管理引用计数：用完即放，计数归零才断开，
+            # 不留“连着但计数为 0”的幽灵客户端，避免下次启动撞 session 锁
+            # （2026-11-20/21 两次卡死根因）。后台任务在用时计数 >0，
+            # 退出只减计数不断开，不会打断任务连接。
             async with acquire_account_lock_with_timeout(
                 account_name, timeout=timeout_seconds
             ):
-                if not getattr(client, "is_connected", False):
-                    await client.connect()
-                me = await asyncio.wait_for(client.get_me(), timeout=timeout_seconds)
+                async with client:
+                    me = await asyncio.wait_for(
+                        client.get_me(), timeout=timeout_seconds
+                    )
             set_account_status(
                 account_name,
                 status="connected",
@@ -936,14 +940,15 @@ class TelegramAccountsMixin:
 
         timeout_seconds = max(1.0, min(float(timeout_seconds or 12.0), 30.0))
         try:
-            # 与 check_account_status 同款：复用共享 Client，不用 async with client
-            # 主动断开正在运行中的任务连接。
+            # 统一走 async with 管理引用计数（见 check_account_status）：
+            # 用完即放，计数归零才断开，不留幽灵客户端撞 session 锁。
             async with acquire_account_lock_with_timeout(
                 account_name, timeout=timeout_seconds
             ):
-                if not getattr(client, "is_connected", False):
-                    await client.connect()
-                me = await asyncio.wait_for(client.get_me(), timeout=timeout_seconds)
+                async with client:
+                    me = await asyncio.wait_for(
+                        client.get_me(), timeout=timeout_seconds
+                    )
         except AccountLockTimeout as e:
             raise AccountLockTimeout("ACCOUNT_BUSY") from e
         except Exception as e:
@@ -1016,12 +1021,12 @@ class TelegramAccountsMixin:
             )
             await self.verify_account_proxy(account_name, proxy_dict)
             try:
+                # 统一走 async with 管理引用计数（见 check_account_status）。
                 async with acquire_account_lock_with_timeout(
                     account_name, timeout=30.0
                 ):
-                    if not getattr(client, "is_connected", False):
-                        await client.connect()
-                    reply_text = await fetch_spambot_reply(client)
+                    async with client:
+                        reply_text = await fetch_spambot_reply(client)
             except AccountLockTimeout as e:
                 raise AccountLockTimeout("ACCOUNT_BUSY") from e
             except Exception as e:
