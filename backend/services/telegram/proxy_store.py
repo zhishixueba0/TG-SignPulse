@@ -524,6 +524,16 @@ async def enrich_proxy(proxy_id: str) -> dict:
     geo = await lookup_geo(row.host)
     now = utc_now_naive()
     if geo and is_blocked_geo(geo):
+        # 已被账号绑定的不删：用户显式选中的代理，不因归属地被后台删掉。
+        if accounts_count_by_proxy().get(str(proxy_id), 0) > 0:
+            return {
+                "ok": ok,
+                "latency_ms": latency,
+                "blocked": True,
+                "country_code": geo.get("country_code"),
+                "reg_country": geo.get("reg_country"),
+                "kept_in_use": True,
+            }
         delete_proxy_row(proxy_id)
         return {
             "ok": ok,
@@ -960,21 +970,46 @@ async def run_proxy_sync() -> dict:
         # 补归属地（只补还没有的，每轮最多 100 条）
         await enrich_unknown_proxies()
 
+        # 已绑定账号数的快照：同步删代理时，已被账号绑定的跳过
+        # （中伊）或先实测（不在新列表），不因“不在新列表”误删用户选中的代理。
+        bound_counts = accounts_count_by_proxy()
+
         # 已知中伊的自动代理剔除，不管它在不在新列表里
+        # （已被账号绑定的跳过，不删用户选中的代理）
         for row in list_proxy_rows():
             if row.source != "freeproxydb":
                 continue
             if is_blocked_geo(
                 {"country_code": row.country_code, "reg_country": row.reg_country}
             ):
+                if bound_counts.get(str(row.id), 0) > 0:
+                    _sync_job["kept_in_use"] = _sync_job.get("kept_in_use", 0) + 1
+                    continue
                 delete_proxy_row(row.id)
                 _sync_job["blocked_removed"] += 1
         # 不在新列表里或这次 TCP 没通过的自动代理删除
+        # （已被账号绑定的先实测 Telegram 握手：通的留着，只删真死了的；
+        # 没人用的直接删，保持池子清理）
         for row in list_proxy_rows():
             if row.source != "freeproxydb":
                 continue
             key = _dedup_key(row.ptype, row.host, row.port, _decrypt(row.secret))
             if key not in passed_auto_keys:
+                if bound_counts.get(str(row.id), 0) > 0:
+                    pd = proxy_dict_for_row(row)
+                    alive = False
+                    if pd is not None:
+                        try:
+                            outcome = await probe_proxy_exit(
+                                pd, force=True, manual=True
+                            )
+                            alive = outcome.status == ProxyProbeStatus.OK
+                        except Exception:
+                            alive = False
+                    if alive:
+                        _sync_job["kept_in_use"] = _sync_job.get("kept_in_use", 0) + 1
+                        continue
+                    # 死了：删，绑它的号按现有规则改直连
                 delete_proxy_row(row.id)
                 _sync_job["removed"] += 1
         _sync_job["status"] = "done"

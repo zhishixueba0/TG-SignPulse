@@ -274,6 +274,109 @@ async def test_sync_skips_invalid_mtproto_secret(memory_session_local, monkeypat
 
 
 @pytest.mark.asyncio
+async def test_sync_keeps_bound_proxy_not_in_new_list_when_alive(
+    memory_session_local, isolated_env, monkeypatch
+):
+    """已绑定账号的代理不在新订阅列表里、但实测还活着：同步不删。
+
+    回归 2026-11-22：用户 12:46 选中的代理 15:07 被同步删了（只因不在新
+    列表里），9 个号被批量改直连。规则：绑定的代理先实测，通的留着。
+    """
+    row = proxy_store.create_proxy(
+        ptype="socks5",
+        host="5.6.7.8",
+        port=1080,
+        label="bound-one",
+        source="freeproxydb",
+    )
+    set_account_profile("acct1", proxy_mode="pool", proxy_id=row.id)
+
+    async def fake_fetch(url):
+        # 新列表里没有 5.6.7.8（旧逻辑会删它）
+        return "socks5://9.9.9.9:1080"
+
+    async def fake_tcp(host, port, timeout=3.0):
+        return (True, 10)
+
+    async def fake_probe(*args, **kwargs):
+        from backend.utils.proxy import ProxyProbeOutcome, ProxyProbeStatus
+
+        return ProxyProbeOutcome(status=ProxyProbeStatus.OK, detail="ok", code="OK")
+
+    async def fake_enrich(proxy_id):
+        return {}
+
+    async def fake_enrich_unknown(limit=100):
+        return 0
+
+    monkeypatch.setattr(proxy_store, "_fetch_subscription_text", fake_fetch)
+    monkeypatch.setattr(proxy_store, "tcp_test_async", fake_tcp)
+    monkeypatch.setattr("backend.utils.proxy.probe_proxy_exit", fake_probe)
+    monkeypatch.setattr(proxy_store, "enrich_proxy", fake_enrich)
+    monkeypatch.setattr(proxy_store, "enrich_unknown_proxies", fake_enrich_unknown)
+
+    job = await proxy_store.run_proxy_sync()
+
+    assert job["status"] == "done"
+    assert proxy_store.get_proxy_row(row.id) is not None
+    binding = proxy_store.get_account_proxy_binding("acct1")
+    assert binding["mode"] == "pool"
+    assert binding["proxy_id"] == row.id
+    assert job.get("kept_in_use", 0) >= 1
+
+
+@pytest.mark.asyncio
+async def test_sync_deletes_bound_proxy_not_in_new_list_when_dead(
+    memory_session_local, isolated_env, monkeypatch
+):
+    """已绑定账号的代理不在新列表里、实测也死了：同步照样删，号改直连。
+
+    绑定的号不是免死金牌，死了照样删（用户原话：不是不让删除，
+    只是删除死了的）。删后账号按现有规则改直连，保证保活能继续。
+    """
+    row = proxy_store.create_proxy(
+        ptype="socks5",
+        host="5.6.7.8",
+        port=1080,
+        label="bound-dead",
+        source="freeproxydb",
+    )
+    set_account_profile("acct1", proxy_mode="pool", proxy_id=row.id)
+
+    async def fake_fetch(url):
+        return "socks5://9.9.9.9:1080"
+
+    async def fake_tcp(host, port, timeout=3.0):
+        return (True, 10)
+
+    async def fake_probe(*args, **kwargs):
+        from backend.utils.proxy import ProxyProbeOutcome, ProxyProbeStatus
+
+        return ProxyProbeOutcome(
+            status=ProxyProbeStatus.FAILED, detail="dead", code="FAILED"
+        )
+
+    async def fake_enrich(proxy_id):
+        return {}
+
+    async def fake_enrich_unknown(limit=100):
+        return 0
+
+    monkeypatch.setattr(proxy_store, "_fetch_subscription_text", fake_fetch)
+    monkeypatch.setattr(proxy_store, "tcp_test_async", fake_tcp)
+    monkeypatch.setattr("backend.utils.proxy.probe_proxy_exit", fake_probe)
+    monkeypatch.setattr(proxy_store, "enrich_proxy", fake_enrich)
+    monkeypatch.setattr(proxy_store, "enrich_unknown_proxies", fake_enrich_unknown)
+
+    job = await proxy_store.run_proxy_sync()
+
+    assert job["status"] == "done"
+    assert proxy_store.get_proxy_row(row.id) is None
+    binding = proxy_store.get_account_proxy_binding("acct1")
+    assert binding["mode"] == "direct"
+
+
+@pytest.mark.asyncio
 async def test_ensure_proxy_dict_usable_blocks_dead_proxy(monkeypatch):
     """绑定前探活拦截：死代理拒绑、活代理放行、直连（None）直接放行。"""
 
