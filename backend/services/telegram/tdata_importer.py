@@ -226,16 +226,32 @@ def _load_tdesktop(tdata_dir: Path, password: Optional[str] = None):
             "no account has been loaded" in err_msg
             or "accountscount is zero" in err_msg
         ):
-            # 诊断：记下 tdata 里到底有什么（只列名字），看账号文件夹在不在
+            # 诊断：记下 tdata 里到底有什么（只列名字），看账号文件夹在不在、
+            # 文件夹里有没有 map 数据文件
             try:
-                entries = sorted(p.name for p in tdata_dir.iterdir())[:20]
+                entries = sorted(p.name for p in tdata_dir.iterdir())
                 hex_folders = [n for n in entries if HEX_FOLDER_PATTERN.match(n)]
                 logger.error(
-                    "TDATA_NO_ACCOUNTS: tdata_dir=%s entries=%s hex_folders=%d",
+                    "TDATA_NO_ACCOUNTS: tdata_dir=%s entries=%d hex_folders=%d hex=%s",
                     tdata_dir,
-                    entries,
+                    len(entries),
                     len(hex_folders),
+                    hex_folders,
                 )
+                for folder in hex_folders[:3]:
+                    try:
+                        inner = sorted(p.name for p in (tdata_dir / folder).iterdir())[
+                            :10
+                        ]
+                        logger.error(
+                            "TDATA_NO_ACCOUNTS: folder %s contents=%s",
+                            folder,
+                            inner,
+                        )
+                    except OSError:
+                        logger.error(
+                            "TDATA_NO_ACCOUNTS: folder %s (unlistable)", folder
+                        )
             except OSError:
                 logger.error("TDATA_NO_ACCOUNTS: tdata_dir=%s (unlistable)", tdata_dir)
             raise ValueError(
