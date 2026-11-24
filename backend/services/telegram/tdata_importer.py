@@ -203,7 +203,11 @@ def _load_tdesktop(tdata_dir: Path, password: Optional[str] = None):
             raise RuntimeError(
                 "TDATA_CONVERTER_UNAVAILABLE: No compatible TData parser found in opentele"
             )
-    except Exception as exc:
+    except BaseException as exc:
+        # opentele 的 OpenTeleException 继承 BaseException 而非 Exception，
+        # 用 except Exception 抓不住它，会原样冒上去变成 500
+        if isinstance(exc, (KeyboardInterrupt, SystemExit)):
+            raise
         err_msg = str(exc).lower()
         err_type = type(exc).__name__.lower()
         if "wrong" in err_msg or "wrong" in err_type or "invalid" in err_msg:

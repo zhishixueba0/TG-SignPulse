@@ -612,8 +612,15 @@ class TestTDataMultiAccount:
         assert MAX_TDATA_ACCOUNTS > 3
 
     def test_load_tdesktop_no_accounts_maps_to_clear_error(self, tmp_path: Path):
-        """opentele 读出 0 个号时映射成 TDATA_NO_ACCOUNTS，不再是 500 内部错误。"""
+        """opentele 读出 0 个号时映射成 TDATA_NO_ACCOUNTS，不再是 500 内部错误。
+
+        真实的 OpenTeleException 继承 BaseException 而非 Exception，
+        用普通 RuntimeError 测不到这层，必须用 BaseException 子类模拟。
+        """
         from backend.services.telegram.tdata_importer import _load_tdesktop
+
+        class FakeOpenTeleException(BaseException):
+            pass
 
         tdata_dir = tmp_path / "tdata"
         tdata_dir.mkdir()
@@ -621,7 +628,7 @@ class TestTDataMultiAccount:
         mock_opentele = MagicMock()
         mock_td_module = MagicMock()
         mock_opentele.td = mock_td_module
-        mock_td_module.TData.Create.side_effect = RuntimeError(
+        mock_td_module.TData.Create.side_effect = FakeOpenTeleException(
             "Unexpected Exception: No account has been loaded"
         )
         with patch.dict(
