@@ -128,23 +128,15 @@ def _check_opentele_available() -> tuple[Any, Any]:
         ) from exc
 
 
-def convert_tdata_to_session(
-    account_name: str,
-    tdata_dir: Path,
-    session_dir: Path,
-    password: Optional[str] = None,
-) -> Path:
-    """Convert Telegram Desktop tdata directory to a Pyrogram SQLite session file.
+def _load_tdesktop(tdata_dir: Path, password: Optional[str] = None):
+    """Load a TDesktop/TData instance from a tdata directory.
 
+    Maps password problems to TDATA_PASSWORD_REQUIRED / TDATA_PASSWORD_INVALID.
     Requires the optional 'opentele' library.
     """
     opentele, tdesktop_cls = _check_opentele_available()
 
     tdata_dir = Path(tdata_dir).resolve()
-    session_dir = Path(session_dir).resolve()
-    session_dir.mkdir(parents=True, exist_ok=True)
-    target_session_file = session_dir / f"{account_name}.session"
-
     td = None
     try:
         # Check if opentele.td.TData.Create exists (e.g. specialized wrappers)
@@ -195,6 +187,119 @@ def convert_tdata_to_session(
     ):
         raise ValueError("TDATA_PASSWORD_REQUIRED")
 
+    return td
+
+
+def _build_pyrogram_session(account, target_session_file: Path) -> bool:
+    """用单个账号的 authKey/UserId 建一个最小 Pyrogram SQLite 会话。返回是否成功。"""
+    auth_key_obj = getattr(account, "authKey", None)
+    if not auth_key_obj:
+        return False
+    dc_id = getattr(auth_key_obj, "dcId", 2)
+    key = getattr(auth_key_obj, "key", None)
+    user_id = getattr(account, "UserId", getattr(account, "user_id", 0))
+    if not key:
+        return False
+    conn = sqlite3.connect(target_session_file)
+    try:
+        conn.executescript(SCHEMA)
+        conn.execute("INSERT INTO version VALUES (?)", (SQLiteStorage.VERSION,))
+        insert_session_record(
+            conn.cursor(),
+            dc_id=int(dc_id),
+            auth_key=key,
+            date=int(time.time()),
+            user_id=int(user_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    return True
+
+
+def list_tdata_accounts(
+    zip_payload: bytes | Path,
+    password: Optional[str] = None,
+) -> list[dict]:
+    """列出 TData 压缩包里的所有账号（只读 user_id，不导入、不落会话）。
+
+    返回 [{index, user_id, is_authorized}]，index 即导入时 tdata_account_index 的取值。
+    """
+    temp_dir_str = tempfile.mkdtemp(prefix="tdata_list_")
+    temp_dir = Path(temp_dir_str)
+    try:
+        if isinstance(zip_payload, bytes):
+            zip_file = temp_dir / "upload.zip"
+            zip_file.write_bytes(zip_payload)
+        else:
+            zip_file = Path(zip_payload)
+
+        extract_dir = temp_dir / "extracted"
+        tdata_dir = extract_tdata_zip(zip_file, extract_dir)
+
+        if not is_valid_tdata_path(tdata_dir):
+            raise ValueError(
+                "TDATA_INVALID_STRUCTURE: Extracted archive does not contain a valid tdata structure (missing key_datas)"
+            )
+
+        td = _load_tdesktop(tdata_dir, password)
+        accounts = getattr(td, "accounts", None) or []
+        result = []
+        for idx, account in enumerate(accounts):
+            user_id = int(
+                getattr(account, "UserId", getattr(account, "user_id", 0)) or 0
+            )
+            is_authorized = False
+            if hasattr(account, "isAuthorized") and callable(account.isAuthorized):
+                try:
+                    is_authorized = bool(account.isAuthorized())
+                except Exception:
+                    is_authorized = False
+            result.append(
+                {"index": idx, "user_id": user_id, "is_authorized": is_authorized}
+            )
+        return result
+    finally:
+        with contextlib.suppress(Exception):
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+
+def convert_tdata_to_session(
+    account_name: str,
+    tdata_dir: Path,
+    session_dir: Path,
+    password: Optional[str] = None,
+    account_index: Optional[int] = None,
+) -> Path:
+    """Convert Telegram Desktop tdata directory to a Pyrogram SQLite session file.
+
+    Requires the optional 'opentele' library.
+    account_index 为 None 时转主账号；指定下标时只转该账号（AyuGram 等多账号 TData 用）。
+    """
+    tdata_dir = Path(tdata_dir).resolve()
+    session_dir = Path(session_dir).resolve()
+    session_dir.mkdir(parents=True, exist_ok=True)
+    target_session_file = session_dir / f"{account_name}.session"
+
+    td = _load_tdesktop(tdata_dir, password)
+
+    # 指定了账号下标：直接用该账号的 authKey 建 Pyrogram 会话
+    if account_index is not None:
+        accounts = getattr(td, "accounts", None) or []
+        if not accounts:
+            raise ValueError("TDATA_NO_ACCOUNTS: TData 中没有可用账号")
+        if account_index < 0 or account_index >= len(accounts):
+            raise ValueError(
+                "TDATA_ACCOUNT_INDEX_OUT_OF_RANGE: "
+                f"下标 {account_index} 超出范围 (0-{len(accounts) - 1})"
+            )
+        account = accounts[account_index]
+        if _build_pyrogram_session(account, target_session_file):
+            return target_session_file
+        raise RuntimeError(
+            "TDATA_CONVERSION_FAILED: Failed to generate session file from tdata archive"
+        )
+
     # If the converted result already created a file or is a path
     if isinstance(td, (str, Path)) and Path(td).is_file():
         shutil.copyfile(Path(td), target_session_file)
@@ -227,28 +332,7 @@ def convert_tdata_to_session(
 
     elif hasattr(td, "mainAccount") or hasattr(td, "authKey"):
         account = getattr(td, "mainAccount", td)
-        auth_key_obj = getattr(account, "authKey", None)
-        if auth_key_obj:
-            dc_id = getattr(auth_key_obj, "dcId", 2)
-            key = getattr(auth_key_obj, "key", None)
-            user_id = getattr(account, "UserId", getattr(account, "user_id", 0))
-            if key:
-                conn = sqlite3.connect(target_session_file)
-                try:
-                    conn.executescript(SCHEMA)
-                    conn.execute(
-                        "INSERT INTO version VALUES (?)", (SQLiteStorage.VERSION,)
-                    )
-                    insert_session_record(
-                        conn.cursor(),
-                        dc_id=int(dc_id),
-                        auth_key=key,
-                        date=int(time.time()),
-                        user_id=int(user_id),
-                    )
-                    conn.commit()
-                finally:
-                    conn.close()
+        _build_pyrogram_session(account, target_session_file)
 
     if target_session_file.is_file():
         return target_session_file
@@ -268,9 +352,11 @@ async def import_tdata_session(
     target_dir: Optional[Path] = None,
     proxy_id: Optional[str] = None,
     proxy_mode: Optional[str] = None,
+    account_index: Optional[int] = None,
 ) -> Dict[str, Any]:
     """Safely unpack TData zip, convert to session, and delegate to Task 9 import_session.
 
+    account_index 为 None 时转主账号；指定下标时只转该账号。
     Guarantees full temporary directory cleanup on both success and failure.
     """
     temp_dir_str = tempfile.mkdtemp(prefix="tdata_import_")
@@ -297,6 +383,7 @@ async def import_tdata_session(
             tdata_dir=tdata_dir,
             session_dir=converted_dir,
             password=password,
+            account_index=account_index,
         )
 
         from backend.services.telegram.session_importer import import_session

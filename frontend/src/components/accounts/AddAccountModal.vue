@@ -12,6 +12,8 @@ import {
   cancelQrLogin,
   importAccountSession,
   importAccountSessionFile,
+  previewTDataAccounts,
+  type TDataAccountEntry,
   getPasskeyStatus,
   passkeyLogin,
   submitPasskeyPassword,
@@ -58,12 +60,63 @@ const forceOverwrite = ref(false)
 const highlightTdataPassword = ref(false)
 const tdataPasswordInputRef = ref<HTMLInputElement | null>(null)
 
+// TData 多账号预览：选 zip 后点“预览账号”列出包里的号，挑一个再导
+const tdataAccounts = ref<TDataAccountEntry[]>([])
+const tdataPreviewLoading = ref(false)
+const selectedTdataIndex = ref<number | null>(null)
+const isTdataZip = computed(() => !!selectedFile.value && /\.zip$/i.test(selectedFile.value.name))
+
+const resetTdataPreview = () => {
+  tdataAccounts.value = []
+  selectedTdataIndex.value = null
+}
+
+const handlePreviewTdata = async () => {
+  if (!selectedFile.value) return
+  const token = getAuthToken()
+  if (!token) return
+  tdataPreviewLoading.value = true
+  error.value = ''
+  highlightTdataPassword.value = false
+  try {
+    const res = await previewTDataAccounts(
+      token,
+      selectedFile.value,
+      form.value.tdata_password || undefined,
+    )
+    tdataAccounts.value = res.accounts || []
+    selectedTdataIndex.value = null
+    if (tdataAccounts.value.length === 0) {
+      error.value = t('addAccount.tdataNoAccounts')
+    }
+  } catch (e: unknown) {
+    const code = getErrorCode(e)
+    const msg = getRawErrorMessage(e)
+    if (code === 'TDATA_CONVERTER_UNAVAILABLE' || msg.includes('TDATA_CONVERTER_UNAVAILABLE')) {
+      error.value = t('addAccount.tdataConverterUnavailable')
+    } else if (code === 'TDATA_PASSWORD_REQUIRED' || msg.includes('TDATA_PASSWORD_REQUIRED')) {
+      error.value = t('addAccount.tdataPasswordRequired')
+      highlightTdataPassword.value = true
+      tdataPasswordInputRef.value?.focus()
+    } else if (code === 'TDATA_PASSWORD_INVALID' || msg.includes('TDATA_PASSWORD_INVALID')) {
+      error.value = t('addAccount.tdataPasswordInvalid')
+      highlightTdataPassword.value = true
+      tdataPasswordInputRef.value?.focus()
+    } else {
+      error.value = getLocalizedErrorMessage(e, t) || t('addAccount.tdataPreviewFailed')
+    }
+  } finally {
+    tdataPreviewLoading.value = false
+  }
+}
+
 const handleFileChange = (e: Event) => {
   const input = e.target as HTMLInputElement
   if (input.files && input.files[0]) {
     selectedFile.value = input.files[0]
     selectedFileName.value = input.files[0].name
     highlightTdataPassword.value = false
+    resetTdataPreview()
     if (!form.value.account_name) {
       const baseName = input.files[0].name.replace(/\.(session|zip)$/i, '').trim()
       if (baseName) {
@@ -195,6 +248,7 @@ const reset = async () => {
   selectedFile.value = null
   selectedFileName.value = ''
   forceOverwrite.value = false
+  resetTdataPreview()
   importSubtype.value = 'file'
   loading.value = false
   proxyMode.value = 'inherit'
@@ -412,6 +466,7 @@ const handleSave = async () => {
           form.value.tdata_password || undefined,
           loginProxy.proxy_id,
           loginProxy.proxy_mode,
+          selectedTdataIndex.value ?? undefined,
         )
       } else {
         if (!form.value.session_content.trim()) {
@@ -728,6 +783,36 @@ onUnmounted(() => {
               class="ui-input transition-colors duration-150"
               :class="{ '!border-rose-500 !ring-1 !ring-rose-500': highlightTdataPassword }"
             />
+          </div>
+
+          <!-- TData Accounts Preview (zip only, e.g. AyuGram multi-account tdata) -->
+          <div v-if="importSubtype === 'file' && isTdataZip" class="space-y-1.5">
+            <button
+              type="button"
+              class="ui-btn-secondary !px-4 !py-2"
+              :disabled="tdataPreviewLoading"
+              @click="handlePreviewTdata"
+            >
+              {{ tdataPreviewLoading ? t('addAccount.tdataPreviewing') : t('addAccount.tdataPreview') }}
+            </button>
+            <div v-if="tdataAccounts.length > 0" class="space-y-1.5 pt-1">
+              <p class="text-xs text-[var(--sp-text-muted)]">{{ t('addAccount.tdataPickAccount') }}</p>
+              <label
+                v-for="acc in tdataAccounts"
+                :key="acc.index"
+                class="flex items-center gap-2 text-sm cursor-pointer"
+              >
+                <input
+                  type="radio"
+                  :value="acc.index"
+                  v-model="selectedTdataIndex"
+                  class="text-sky-600 focus:ring-sky-500"
+                />
+                <span class="font-mono">{{ acc.user_id }}</span>
+                <span v-if="!acc.is_authorized" class="text-xs text-amber-500">{{ t('addAccount.tdataNotAuthorized') }}</span>
+              </label>
+              <p class="text-[11px] text-[var(--sp-text-muted)]">{{ t('addAccount.tdataPickHint') }}</p>
+            </div>
           </div>
 
           <!-- StringSession Input -->

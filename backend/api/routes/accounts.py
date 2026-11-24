@@ -60,6 +60,8 @@ from backend.api.routes.accounts_schemas import (
     SpamCheckResponse,
     StandaloneSessionExportRequest,
     StandaloneSessionExportResponse,
+    TDataAccountEntry,
+    TDataPreviewResponse,
     TerminateDeviceResponse,
     TopicItem,
     _extract_last_bot_message,
@@ -427,6 +429,7 @@ async def import_session(
     proxy_id: Optional[str] = None
     proxy_mode: Optional[str] = None
     tdata_password: Optional[str] = None
+    tdata_account_index: Optional[int] = None
     payload: bytes | str = ""
 
     if "multipart/form-data" in content_type:
@@ -445,6 +448,12 @@ async def import_session(
         proxy_mode = str(proxy_mode_raw).strip() if proxy_mode_raw else None
         tdata_pwd_raw = form.get("tdata_password")
         tdata_password = str(tdata_pwd_raw).strip() if tdata_pwd_raw else None
+        tdata_idx_raw = form.get("tdata_account_index")
+        if tdata_idx_raw is not None and str(tdata_idx_raw).strip() != "":
+            try:
+                tdata_account_index = int(str(tdata_idx_raw).strip())
+            except (TypeError, ValueError):
+                tdata_account_index = None
 
         file = form.get("file")
         if file and hasattr(file, "read"):
@@ -465,6 +474,7 @@ async def import_session(
             proxy_id = req.proxy_id
             proxy_mode = req.proxy_mode
             tdata_password = req.tdata_password.strip() if req.tdata_password else None
+            tdata_account_index = req.tdata_account_index
             if not session_content:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
@@ -538,6 +548,7 @@ async def import_session(
                     password=tdata_password,
                     force=force,
                     proxy=proxy,
+                    account_index=tdata_account_index,
                 )
         else:
             res = await svc.import_session(
@@ -605,6 +616,81 @@ async def import_session(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Import session failed: {e}",
         )
+
+
+@router.post("/import-session/tdata/preview", response_model=TDataPreviewResponse)
+async def preview_tdata_accounts(
+    request: Request,
+    current_user: User = Depends(get_current_user),
+):
+    """预览 TData zip 里的账号列表（只读 user_id，不导入）。
+
+    multipart/form-data: file=<tdata zip>, tdata_password=<本地密码，可选>。
+    返回包里所有账号的下标与 user_id，供导入时挑号用。
+    """
+    from backend.services.telegram.tdata_importer import list_tdata_accounts
+
+    content_type = request.headers.get("content-type", "")
+    if "multipart/form-data" not in content_type:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="multipart/form-data with a zip file is required",
+        )
+    form = await request.form()
+    tdata_pwd_raw = form.get("tdata_password")
+    tdata_password = str(tdata_pwd_raw).strip() if tdata_pwd_raw else None
+    file = form.get("file")
+    if not file or not hasattr(file, "read"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No file provided",
+        )
+    payload = await file.read()
+    if not payload:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Empty file",
+        )
+    MAX_SESSION_UPLOAD_SIZE = 50 * 1024 * 1024
+    if len(payload) > MAX_SESSION_UPLOAD_SIZE:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail="Session payload exceeds 50MB limit",
+        )
+    try:
+        accounts = list_tdata_accounts(payload, tdata_password)
+    except RuntimeError as e:
+        err_msg = str(e)
+        if "TDATA_CONVERTER_UNAVAILABLE" in err_msg:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="TDATA_CONVERTER_UNAVAILABLE",
+            )
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=err_msg,
+        )
+    except ValueError as e:
+        err_msg = str(e)
+        if "TDATA_PASSWORD_REQUIRED" in err_msg:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="TDATA_PASSWORD_REQUIRED",
+            )
+        if "TDATA_PASSWORD_INVALID" in err_msg:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="TDATA_PASSWORD_INVALID",
+            )
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=err_msg,
+        )
+    return TDataPreviewResponse(
+        success=True,
+        accounts=[TDataAccountEntry(**a) for a in accounts],
+        message=f"共 {len(accounts)} 个账号",
+    )
 
 
 @router.get("/device-profiles")

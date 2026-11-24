@@ -1284,8 +1284,12 @@ class TelegramAccountsMixin:
         proxy: Optional[str] = None,
         proxy_id: Optional[str] = None,
         proxy_mode: Optional[str] = None,
+        account_index: Optional[int] = None,
     ) -> Dict[str, Any]:
-        """导入 Telegram Desktop (TData) 归档包。"""
+        """导入 Telegram Desktop (TData) 归档包。
+
+        account_index 为 None 时转主账号；指定下标时只转该账号。
+        """
         from backend.services.telegram.tdata_importer import (
             import_tdata_session as do_import_tdata_session,
         )
@@ -1299,6 +1303,7 @@ class TelegramAccountsMixin:
             target_dir=self.session_dir,
             proxy_id=proxy_id,
             proxy_mode=proxy_mode,
+            account_index=account_index,
         )
         self._accounts_cache = None
         return res

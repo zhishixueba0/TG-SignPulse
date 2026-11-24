@@ -18,6 +18,7 @@ from backend.services.telegram.tdata_importer import (
     extract_tdata_zip,
     import_tdata_session,
     is_valid_tdata_path,
+    list_tdata_accounts,
 )
 from tests.test_api import _auth, _login
 
@@ -355,7 +356,9 @@ class TestTDataSuccessFlow:
         zip_bytes = _create_sample_tdata_zip(nested=True)
         pyro_sqlite = _make_pyrogram_sqlite_bytes(user_id=88888)
 
-        def mock_convert(account_name, tdata_dir, session_dir, password=None):
+        def mock_convert(
+            account_name, tdata_dir, session_dir, password=None, account_index=None
+        ):
             sess_file = session_dir / f"{account_name}.session"
             sess_file.write_bytes(pyro_sqlite)
             return sess_file
@@ -386,7 +389,9 @@ class TestTDataSuccessFlow:
         zip_bytes = _create_sample_tdata_zip(nested=True)
         pyro_sqlite = _make_pyrogram_sqlite_bytes(user_id=77777)
 
-        def mock_convert(account_name, tdata_dir, session_dir, password=None):
+        def mock_convert(
+            account_name, tdata_dir, session_dir, password=None, account_index=None
+        ):
             sess_file = session_dir / f"{account_name}.session"
             sess_file.write_bytes(pyro_sqlite)
             return sess_file
@@ -415,3 +420,118 @@ class TestTDataSuccessFlow:
                 assert data["success"] is True
                 assert data["user_id"] == 77777
                 assert data["first_name"] == "ApiTDataUser"
+
+
+class _FakeAuthKey:
+    def __init__(self, dc_id: int, key: bytes):
+        self.dcId = dc_id
+        self.key = key
+
+
+class _FakeAccount:
+    def __init__(self, user_id: int, authorized: bool = True):
+        self.UserId = user_id
+        self.authKey = _FakeAuthKey(2, b"K" * 256)
+        self._authorized = authorized
+
+    def isAuthorized(self) -> bool:
+        return self._authorized
+
+
+class _FakeTDesktop:
+    """多账号 TData 的替身：accounts 按顺序排，mainAccount 为第一个。"""
+
+    def __init__(self, user_ids: list[int]):
+        self.accounts = [_FakeAccount(uid) for uid in user_ids]
+        self.mainAccount = self.accounts[0] if self.accounts else None
+
+    def isLoaded(self) -> bool:
+        return True
+
+    def hasPasscode(self) -> bool:
+        return False
+
+
+def _mock_opentele_with_td(fake_td: _FakeTDesktop):
+    """让 opentele.td.TData.Create 返回给定的假 TDesktop。"""
+    mock_opentele = MagicMock()
+    mock_td_module = MagicMock()
+    mock_opentele.td = mock_td_module
+    mock_td_module.TData.Create.return_value = fake_td
+    return mock_opentele, mock_td_module
+
+
+class TestTDataMultiAccount:
+    """AyuGram 等多账号 TData：预览列出所有号，导入可按下标挑号。"""
+
+    def test_list_tdata_accounts_returns_all(self, tmp_path: Path):
+        zip_bytes = _create_sample_tdata_zip(nested=True)
+        fake_td = _FakeTDesktop([111111, 222222, 333333])
+        mock_opentele, mock_td_module = _mock_opentele_with_td(fake_td)
+        with patch.dict(
+            sys.modules, {"opentele": mock_opentele, "opentele.td": mock_td_module}
+        ):
+            accounts = list_tdata_accounts(zip_bytes)
+        assert [a["user_id"] for a in accounts] == [111111, 222222, 333333]
+        assert [a["index"] for a in accounts] == [0, 1, 2]
+        assert all(a["is_authorized"] for a in accounts)
+
+    def test_convert_tdata_with_account_index(self, tmp_path: Path):
+        tdata_dir = tmp_path / "tdata"
+        tdata_dir.mkdir()
+        (tdata_dir / "key_datas").write_bytes(b"mock")
+        session_dir = tmp_path / "sessions"
+        session_dir.mkdir()
+        fake_td = _FakeTDesktop([111111, 222222, 333333])
+        mock_opentele, mock_td_module = _mock_opentele_with_td(fake_td)
+        with patch.dict(
+            sys.modules, {"opentele": mock_opentele, "opentele.td": mock_td_module}
+        ):
+            session_file = convert_tdata_to_session(
+                "picked", tdata_dir, session_dir, account_index=1
+            )
+        assert session_file.is_file()
+        conn = sqlite3.connect(session_file)
+        try:
+            row = conn.execute("SELECT user_id FROM sessions").fetchone()
+        finally:
+            conn.close()
+        assert row is not None
+        assert row[0] == 222222
+
+    def test_convert_tdata_account_index_out_of_range(self, tmp_path: Path):
+        tdata_dir = tmp_path / "tdata"
+        tdata_dir.mkdir()
+        (tdata_dir / "key_datas").write_bytes(b"mock")
+        session_dir = tmp_path / "sessions"
+        session_dir.mkdir()
+        fake_td = _FakeTDesktop([111111, 222222])
+        mock_opentele, mock_td_module = _mock_opentele_with_td(fake_td)
+        with patch.dict(
+            sys.modules, {"opentele": mock_opentele, "opentele.td": mock_td_module}
+        ):
+            with pytest.raises(ValueError, match="TDATA_ACCOUNT_INDEX_OUT_OF_RANGE"):
+                convert_tdata_to_session(
+                    "picked", tdata_dir, session_dir, account_index=5
+                )
+
+    def test_api_preview_tdata_accounts(self, api_client):
+        headers = _auth(_login(api_client))
+        zip_bytes = _create_sample_tdata_zip(nested=True)
+        with patch(
+            "backend.services.telegram.tdata_importer.list_tdata_accounts",
+            return_value=[
+                {"index": 0, "user_id": 111111, "is_authorized": True},
+                {"index": 1, "user_id": 222222, "is_authorized": True},
+            ],
+        ):
+            resp = api_client.post(
+                "/api/accounts/import-session/tdata/preview",
+                headers=headers,
+                files={"file": ("tdata.zip", zip_bytes, "application/zip")},
+            )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["success"] is True
+        assert [a["user_id"] for a in data["accounts"]] == [111111, 222222]
+        assert [a["index"] for a in data["accounts"]] == [0, 1]

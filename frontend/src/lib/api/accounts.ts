@@ -554,6 +554,7 @@ export interface ImportSessionRequest {
   proxy_id?: string;
   proxy_mode?: "inherit" | "direct" | "pool" | "custom";
   tdata_password?: string;
+  tdata_account_index?: number;
 }
 
 export interface ImportSessionResponse {
@@ -562,6 +563,18 @@ export interface ImportSessionResponse {
   user_id?: number | null;
   first_name?: string | null;
   username?: string | null;
+  message: string;
+}
+
+export interface TDataAccountEntry {
+  index: number;
+  user_id: number;
+  is_authorized: boolean;
+}
+
+export interface TDataPreviewResponse {
+  success: boolean;
+  accounts: TDataAccountEntry[];
   message: string;
 }
 
@@ -580,6 +593,7 @@ export const importAccountSessionFile = async (
   tdataPassword?: string,
   proxyId?: string,
   proxyMode?: string,
+  tdataAccountIndex?: number,
 ): Promise<ImportSessionResponse> => {
   const formData = new FormData();
   formData.append("account_name", accountName);
@@ -589,10 +603,30 @@ export const importAccountSessionFile = async (
   if (tdataPassword) formData.append("tdata_password", tdataPassword);
   if (proxyId) formData.append("proxy_id", proxyId);
   if (proxyMode) formData.append("proxy_mode", proxyMode);
+  if (tdataAccountIndex !== undefined && tdataAccountIndex !== null) {
+    formData.append("tdata_account_index", String(tdataAccountIndex));
+  }
   formData.append("file", file);
 
   return requestFormData<ImportSessionResponse>(
     "/accounts/import-session",
+    formData,
+    token,
+    LONG_TIMEOUT_MS,
+  );
+};
+
+export const previewTDataAccounts = async (
+  token: string,
+  file: File | Blob,
+  tdataPassword?: string,
+): Promise<TDataPreviewResponse> => {
+  const formData = new FormData();
+  if (tdataPassword) formData.append("tdata_password", tdataPassword);
+  formData.append("file", file);
+
+  return requestFormData<TDataPreviewResponse>(
+    "/accounts/import-session/tdata/preview",
     formData,
     token,
     LONG_TIMEOUT_MS,

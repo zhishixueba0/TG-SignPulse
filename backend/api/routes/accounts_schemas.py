@@ -401,6 +401,8 @@ class ImportSessionRequest(BaseModel):
     proxy_id: Optional[str] = None
     proxy_mode: Optional[str] = None
     tdata_password: Optional[str] = None
+    # TData 多账号时指定转第几个账号（下标从 0 起）；不填则转主账号
+    tdata_account_index: Optional[int] = None
 
 
 class ImportSessionResponse(BaseModel):
@@ -412,6 +414,22 @@ class ImportSessionResponse(BaseModel):
     first_name: Optional[str] = None
     username: Optional[str] = None
     message: str = "会话导入成功"
+
+
+class TDataAccountEntry(BaseModel):
+    """TData 压缩包里的一个账号（预览用，只读 user_id）"""
+
+    index: int
+    user_id: int
+    is_authorized: bool = False
+
+
+class TDataPreviewResponse(BaseModel):
+    """TData 预览响应：列出包里的所有账号"""
+
+    success: bool
+    accounts: list[TDataAccountEntry] = []
+    message: str = ""
 
 
 class StandaloneSessionExportRequest(BaseModel):
