@@ -97,11 +97,36 @@ def extract_tdata_zip(zip_path: Path, target_dir: Path) -> Path:
                 raise ValueError(f"Zip Slip parent traversal detected: '{member_name}'")
             zf.extract(member, target_dir)
 
-    nested_tdata = target_dir / "tdata"
-    if nested_tdata.is_dir():
-        return nested_tdata
+    # 递归找 tdata 目录：直接打 tdata、打了 tdata/ 一层、打了整个 AyuGram 数据目录
+    # （AyuGram Desktop/tdata/）等多层嵌套都要能找到，取最浅的那个。
+    found = _find_tdata_dir(target_dir)
+    return found if found is not None else target_dir
 
-    return target_dir
+
+def _find_tdata_dir(root: Path) -> Path | None:
+    """在解压树里按广度优先找 tdata 目录（含有 key_datas 或 16 位 hex 子文件夹）。
+
+    最多往下找 4 层，避免深嵌套 zip 扫太久；同层内名为 tdata 的目录优先。
+    """
+    from collections import deque
+
+    queue: deque[tuple[Path, int]] = deque([(root, 0)])
+    while queue:
+        current, depth = queue.popleft()
+        if is_valid_tdata_path(current):
+            return current
+        if depth >= 4:
+            continue
+        try:
+            children = sorted(
+                (c for c in current.iterdir() if c.is_dir()),
+                key=lambda p: (p.name != "tdata", p.name),
+            )
+        except OSError:
+            continue
+        for child in children:
+            queue.append((child, depth + 1))
+    return None
 
 
 def _check_opentele_available() -> tuple[Any, Any]:

@@ -118,6 +118,32 @@ class TestTDataDetectionAndExtraction:
         assert extracted_path_flat == target_flat
         assert (extracted_path_flat / "key_datas").is_file()
 
+    def test_extract_tdata_zip_finds_deeply_nested_tdata(self, tmp_path: Path):
+        # 整个 AyuGram 数据目录打进来：AyuGram Desktop/tdata/key_datas
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+            zf.writestr("AyuGram Desktop/tdata/key_datas", b"MOCK_KEY_DATAS_CONTENT")
+            zf.writestr("AyuGram Desktop/tdata/0123456789ABCDEF/map", b"x")
+        deep_zip = tmp_path / "deep.zip"
+        deep_zip.write_bytes(buf.getvalue())
+        target = tmp_path / "dest_deep"
+
+        extracted = extract_tdata_zip(deep_zip, target)
+        assert extracted == target / "AyuGram Desktop" / "tdata"
+        assert (extracted / "key_datas").is_file()
+
+    def test_extract_tdata_zip_no_tdata_returns_root(self, tmp_path: Path):
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+            zf.writestr("random/file.txt", b"hello")
+        bad_zip = tmp_path / "bad.zip"
+        bad_zip.write_bytes(buf.getvalue())
+        target = tmp_path / "dest_bad"
+
+        extracted = extract_tdata_zip(bad_zip, target)
+        assert extracted == target
+        assert not is_valid_tdata_path(extracted)
+
 
 class TestTDataConversionAndCleanup:
     def test_convert_tdata_missing_optional_dependency_has_clear_error(
