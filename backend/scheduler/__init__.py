@@ -523,6 +523,14 @@ def _sync_auto_backup_job() -> None:
         cfg = get_config_service().get_global_settings()
         if should_run_auto_backup(cfg):
             hours = auto_backup_interval_hours(cfg)
+            existing = scheduler.get_job(job_id)
+            if existing is not None:
+                # 已存在且间隔未变：不重新注册，避免重置倒计时。
+                # replace_existing + 全新 IntervalTrigger 会把下次运行时间
+                # 推到现在 + 间隔，同步一频繁，任务就永远跑不到。
+                interval = getattr(existing.trigger, "interval", None)
+                if interval == timedelta(hours=hours):
+                    return
             scheduler.add_job(
                 _job_auto_backup,
                 trigger=IntervalTrigger(hours=hours),

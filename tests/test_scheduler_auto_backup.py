@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import timedelta
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
@@ -123,3 +124,96 @@ class TestAutoBackupFormat:
         kwargs = run_m.call_args.kwargs
         assert kwargs["encrypt"] is True
         assert kwargs["password"] is None
+
+
+class _FakeJob:
+    """只保留 _sync_auto_backup_job 读到的 trigger.interval。"""
+
+    def __init__(self, interval: timedelta):
+        from types import SimpleNamespace
+
+        self.trigger = SimpleNamespace(interval=interval)
+
+
+class _FakeScheduler:
+    """记录 add/remove 调用；未启动的真调度器上 replace_existing 不生效，
+    无法用来断言“是否重新注册”，所以用假的锁住这层逻辑。"""
+
+    def __init__(self) -> None:
+        self.jobs: dict = {}
+        self.add_calls = 0
+        self.remove_calls = 0
+
+    def get_job(self, job_id):
+        return self.jobs.get(job_id)
+
+    def add_job(self, func, trigger, id, replace_existing=False, **kwargs):
+        self.jobs[id] = _FakeJob(trigger.interval)
+        self.add_calls += 1
+
+    def remove_job(self, job_id):
+        self.jobs.pop(job_id, None)
+        self.remove_calls += 1
+
+
+class TestSyncAutoBackupJob:
+    """重复同步不重置倒计时；间隔改了才重新注册。"""
+
+    @staticmethod
+    def _setup_scheduler(monkeypatch):
+        import backend.scheduler as sched_mod
+
+        sched = _FakeScheduler()
+        monkeypatch.setattr(sched_mod, "scheduler", sched)
+        return sched
+
+    def test_repeated_sync_does_not_readd(self, isolated_env: Path, monkeypatch):
+        from backend.scheduler import _sync_auto_backup_job
+        from backend.services.config import get_config_service
+
+        get_config_service().save_global_settings(dict(WEBDAV_CFG))
+        sched = self._setup_scheduler(monkeypatch)
+
+        _sync_auto_backup_job()
+        assert sched.add_calls == 1
+        assert sched.get_job("system-auto-backup") is not None
+
+        # 间隔没变：再次同步不应重新注册，否则倒计时被重置
+        _sync_auto_backup_job()
+        assert sched.add_calls == 1
+
+    def test_interval_change_replaces_job(self, isolated_env: Path, monkeypatch):
+        from backend.scheduler import _sync_auto_backup_job
+        from backend.services.config import get_config_service
+
+        get_config_service().save_global_settings(dict(WEBDAV_CFG))
+        sched = self._setup_scheduler(monkeypatch)
+
+        _sync_auto_backup_job()
+        job = sched.get_job("system-auto-backup")
+        assert job is not None
+        assert job.trigger.interval == timedelta(hours=24)
+
+        get_config_service().save_global_settings(
+            dict(WEBDAV_CFG, auto_backup_interval_hours=12)
+        )
+        _sync_auto_backup_job()
+        assert sched.add_calls == 2
+        job = sched.get_job("system-auto-backup")
+        assert job is not None
+        assert job.trigger.interval == timedelta(hours=12)
+
+    def test_disabled_auto_backup_removes_job(self, isolated_env: Path, monkeypatch):
+        from backend.scheduler import _sync_auto_backup_job
+        from backend.services.config import get_config_service
+
+        get_config_service().save_global_settings(dict(WEBDAV_CFG))
+        sched = self._setup_scheduler(monkeypatch)
+
+        _sync_auto_backup_job()
+        assert sched.get_job("system-auto-backup") is not None
+
+        get_config_service().save_global_settings({"auto_backup_enabled": False})
+        _sync_auto_backup_job()
+        assert sched.get_job("system-auto-backup") is None
+        assert sched.remove_calls == 1
