@@ -103,6 +103,17 @@ def extract_tdata_zip(zip_path: Path, target_dir: Path) -> Path:
     return found if found is not None else target_dir
 
 
+def _describe_extracted_tree(root: Path, _max_entries: int = 12) -> str:
+    """描述解压后的顶层内容（只列名字，不读内容），供结构错误时诊断用户到底打了什么包。"""
+    try:
+        entries = sorted(p.name for p in root.iterdir())[:_max_entries]
+    except OSError:
+        return "（无法列出）"
+    if not entries:
+        return "（空）"
+    return "、".join(entries)
+
+
 def _find_tdata_dir(root: Path) -> Path | None:
     """在解压树里按广度优先找 tdata 目录（含有 key_datas 或 16 位 hex 子文件夹）。
 
@@ -153,6 +164,11 @@ def _check_opentele_available() -> tuple[Any, Any]:
         ) from exc
 
 
+# opentele 默认只读下标 0-2 的号（kMaxAccounts=3）；AyuGram 等不限号的客户端下标会排到 3 以后，
+# 不抬高就会被静默跳过，读出 0 个号报 "No account has been loaded"。
+MAX_TDATA_ACCOUNTS = 1000
+
+
 def _load_tdesktop(tdata_dir: Path, password: Optional[str] = None):
     """Load a TDesktop/TData instance from a tdata directory.
 
@@ -160,6 +176,13 @@ def _load_tdesktop(tdata_dir: Path, password: Optional[str] = None):
     Requires the optional 'opentele' library.
     """
     opentele, tdesktop_cls = _check_opentele_available()
+
+    # 抬高 opentele 的账号上限，让下标 >= 3 的号也能被读出来
+    if tdesktop_cls is not None and hasattr(tdesktop_cls, "kMaxAccounts"):
+        try:
+            tdesktop_cls.kMaxAccounts = MAX_TDATA_ACCOUNTS
+        except Exception:
+            pass
 
     tdata_dir = Path(tdata_dir).resolve()
     td = None
@@ -195,6 +218,13 @@ def _load_tdesktop(tdata_dir: Path, password: Optional[str] = None):
             if not password:
                 raise ValueError("TDATA_PASSWORD_REQUIRED") from None
             raise ValueError("TDATA_PASSWORD_INVALID") from None
+        if (
+            "no account has been loaded" in err_msg
+            or "accountscount is zero" in err_msg
+        ):
+            raise ValueError(
+                "TDATA_NO_ACCOUNTS: No account could be loaded from this tdata (key_datas has no readable accounts)"
+            ) from None
         raise
 
     # Handle object inspection if loaded check is supported
@@ -263,8 +293,10 @@ def list_tdata_accounts(
         tdata_dir = extract_tdata_zip(zip_file, extract_dir)
 
         if not is_valid_tdata_path(tdata_dir):
+            found = _describe_extracted_tree(extract_dir)
             raise ValueError(
-                "TDATA_INVALID_STRUCTURE: Extracted archive does not contain a valid tdata structure (missing key_datas)"
+                "TDATA_INVALID_STRUCTURE: Extracted archive does not contain a valid tdata structure (missing key_datas). "
+                f"Top-level entries found: {found}"
             )
 
         td = _load_tdesktop(tdata_dir, password)
@@ -397,8 +429,10 @@ async def import_tdata_session(
         tdata_dir = extract_tdata_zip(zip_file, extract_dir)
 
         if not is_valid_tdata_path(tdata_dir):
+            found = _describe_extracted_tree(extract_dir)
             raise ValueError(
-                "TDATA_INVALID_STRUCTURE: Extracted archive does not contain a valid tdata structure (missing key_datas)"
+                "TDATA_INVALID_STRUCTURE: Extracted archive does not contain a valid tdata structure (missing key_datas). "
+                f"Top-level entries found: {found}"
             )
 
         converted_dir = temp_dir / "converted"

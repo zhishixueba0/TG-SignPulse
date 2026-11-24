@@ -102,6 +102,8 @@ const handlePreviewTdata = async () => {
       error.value = t('addAccount.tdataPasswordInvalid')
       highlightTdataPassword.value = true
       tdataPasswordInputRef.value?.focus()
+    } else if (code === 'TDATA_NO_ACCOUNTS' || msg.includes('TDATA_NO_ACCOUNTS')) {
+      error.value = t('addAccount.tdataNoAccounts')
     } else {
       error.value = getLocalizedErrorMessage(e, t) || t('addAccount.tdataPreviewFailed')
     }

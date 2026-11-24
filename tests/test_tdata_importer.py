@@ -144,6 +144,20 @@ class TestTDataDetectionAndExtraction:
         assert extracted == target
         assert not is_valid_tdata_path(extracted)
 
+    def test_list_tdata_accounts_invalid_structure_names_top_level(
+        self, tmp_path: Path
+    ):
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+            zf.writestr("AyuGram/file.txt", b"hello")
+            zf.writestr("other.txt", b"hi")
+        bad_zip = buf.getvalue()
+        with pytest.raises(ValueError) as exc_info:
+            list_tdata_accounts(bad_zip)
+        assert "TDATA_INVALID_STRUCTURE" in str(exc_info.value)
+        assert "AyuGram" in str(exc_info.value)
+        assert "other.txt" in str(exc_info.value)
+
 
 class TestTDataConversionAndCleanup:
     def test_convert_tdata_missing_optional_dependency_has_clear_error(
@@ -561,3 +575,57 @@ class TestTDataMultiAccount:
         assert data["success"] is True
         assert [a["user_id"] for a in data["accounts"]] == [111111, 222222]
         assert [a["index"] for a in data["accounts"]] == [0, 1]
+
+    def test_load_tdesktop_raises_kmax_accounts(self, tmp_path: Path):
+        """AyuGram 多账号：加载前把 opentele 的 kMaxAccounts 从 3 抬高，否则下标 >=3 的号被静默跳过。"""
+        from backend.services.telegram.tdata_importer import (
+            MAX_TDATA_ACCOUNTS,
+            _load_tdesktop,
+        )
+
+        tdata_dir = tmp_path / "tdata"
+        tdata_dir.mkdir()
+        (tdata_dir / "key_datas").write_bytes(b"mock")
+
+        class FakeTDesktop:
+            kMaxAccounts = 3
+
+            def __init__(self, basePath=None, passcode=None):
+                pass
+
+            def isLoaded(self):
+                return True
+
+            def hasPasscode(self):
+                return False
+
+        mock_opentele = MagicMock()
+        # TData.Create 不存在，走 TDesktop 分支
+        mock_opentele.td = MagicMock(spec=["TDesktop"])
+        mock_opentele.td.TDesktop = FakeTDesktop
+        with patch(
+            "backend.services.telegram.tdata_importer._check_opentele_available",
+            return_value=(mock_opentele, FakeTDesktop),
+        ):
+            _load_tdesktop(tdata_dir)
+        assert FakeTDesktop.kMaxAccounts == MAX_TDATA_ACCOUNTS
+        assert MAX_TDATA_ACCOUNTS > 3
+
+    def test_load_tdesktop_no_accounts_maps_to_clear_error(self, tmp_path: Path):
+        """opentele 读出 0 个号时映射成 TDATA_NO_ACCOUNTS，不再是 500 内部错误。"""
+        from backend.services.telegram.tdata_importer import _load_tdesktop
+
+        tdata_dir = tmp_path / "tdata"
+        tdata_dir.mkdir()
+        (tdata_dir / "key_datas").write_bytes(b"mock")
+        mock_opentele = MagicMock()
+        mock_td_module = MagicMock()
+        mock_opentele.td = mock_td_module
+        mock_td_module.TData.Create.side_effect = RuntimeError(
+            "Unexpected Exception: No account has been loaded"
+        )
+        with patch.dict(
+            sys.modules, {"opentele": mock_opentele, "opentele.td": mock_td_module}
+        ):
+            with pytest.raises(ValueError, match="TDATA_NO_ACCOUNTS"):
+                _load_tdesktop(tdata_dir)
